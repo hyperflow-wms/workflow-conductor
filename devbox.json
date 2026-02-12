@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.14.0/.schema/devbox.schema.json",
+  "packages": [
+    "python@3.11",
+    "uv@0.9.30",
+    "kind@0.31.0",
+    "kubernetes-helm@3.19.1",
+    "kubectl@1.35.0"
+  ],
+  "shell": {
+    "init_hook": [
+      "echo 'Workflow Conductor dev environment ready.'"
+    ]
+  }
+}

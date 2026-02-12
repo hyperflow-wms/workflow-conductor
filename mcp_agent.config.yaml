@@ -1,0 +1,14 @@
+execution_engine: asyncio
+
+mcp:
+  servers:
+    workflow-composer:
+      command: docker
+      args:
+        - run
+        - --rm
+        - -i
+        - hyperflowwms/1000genome-mcp:2.0
+        - python
+        - -m
+        - workflow_composer.mcp_server
