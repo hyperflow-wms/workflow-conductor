@@ -23,7 +23,11 @@ dev = [
     "mypy>=1.14",
     "types-PyYAML>=6.0",
 ]
-all = ["workflow-conductor[google,temporal,dev]"]
+integration = [
+    "workflow-conductor[dev]",
+    "kr8s>=0.17",
+]
+all = ["workflow-conductor[google,temporal,dev,integration]"]
 
 [project.scripts]
 workflow-conductor = "workflow_conductor.cli:main"
@@ -53,3 +57,7 @@ packages = ["workflow_conductor"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: requires Kind cluster (deselect with '-m not integration')",
+    "e2e: end-to-end tests requiring full infrastructure (deselect with '-m not e2e')",
+]
