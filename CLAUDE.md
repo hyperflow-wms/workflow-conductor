@@ -108,6 +108,11 @@ HF_CONDUCTOR_KUBERNETES__CLUSTER_NAME=my-cluster
 HF_CONDUCTOR_LLM__DEFAULT_PROVIDER=google
 ```
 
+## Workflow Conventions
+
+- **After finishing work**: Always commit, create a PR with `@balis` as reviewer
+- **After merging a PR**: Always create an annotated git tag (e.g., `v0.1.0-models`) so we can return to that project state later
+
 ## Implementation Plan
 
 See `docs/implementation-plan.md` for the full plan (8 stages, 7 PRs for Stage 1). Stages 0-2 are core, 3-5 production-worthy, 6-7 refinements.
