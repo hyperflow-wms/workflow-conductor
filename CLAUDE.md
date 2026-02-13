@@ -95,7 +95,7 @@ NL Prompt → ROUTING → PLANNING → VALIDATION → DEPLOYMENT → MONITORING 
 - **Workflow delivery**: ConfigMap mount (not kubectl cp)
 - **Config**: pydantic-settings with `HF_CONDUCTOR_` prefix, `__` nested delimiter
 - **CLI**: Click + Rich
-- **Package layout**: `src/hyperflow_conductor/` with `phases/`, `k8s/`, `ui/` subpackages
+- **Package layout**: `src/workflow_conductor/` with `phases/`, `k8s/`, `ui/` subpackages
 - **All models in one file**: `models.py` — prevents circular imports
 - **No utils/ directory**: Avoid premature abstractions
 
@@ -110,4 +110,4 @@ HF_CONDUCTOR_LLM__DEFAULT_PROVIDER=google
 
 ## Implementation Plan
 
-See `final-plan.md` for the full plan (8 stages, 7 PRs for Stage 1). Stages 0-2 are core, 3-5 production-worthy, 6-7 refinements.
+See `docs/implementation-plan.md` for the full plan (8 stages, 7 PRs for Stage 1). Stages 0-2 are core, 3-5 production-worthy, 6-7 refinements.

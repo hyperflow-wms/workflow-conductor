@@ -1,4 +1,4 @@
-# HyperFlow Conductor — Implementation Plan (Final v7)
+# Workflow Conductor — Implementation Plan (Final v7)
 
 > **Generated:** 2026-02-12
 > **Status:** Final merge of v6 final plan + 4-plan debate merged plan, with user-approved decisions on every dimension
@@ -16,12 +16,12 @@ This plan merges two source plans. The table below shows the origin of each deci
 | **MVP phase count** | v6 | 6 phases for MVP | Yes — confirmed |
 | **Stage 0 bootstrap** | Merged | Explicit Stage 0 before MVP | Yes |
 | **Total stages** | v6+Stage0 | 8 stages (0-7): v6's 7 stages + Stage 0 prepended | Yes |
-| **Package layout** | v6 | `src/hyperflow_conductor/` with `phases/`, `k8s/`, `ui/` subpackages | Yes |
+| **Package layout** | v6 | `src/workflow_conductor/` with `phases/`, `k8s/`, `ui/` subpackages | Yes |
 | **Code depth** | User decision | Conceptual only (signatures + patterns, not full implementations) | Yes |
 | **Data models** | v6 | Rich PipelineState with `synthesize_context_for_composer()`, v2 hooks | Yes |
 | **Configuration** | v6 | Nested pydantic-settings, `HF_CONDUCTOR_` prefix, `__` delimiter | Yes |
 | **Workflow delivery** | v6 | ConfigMap mount (not kubectl cp) | Yes — confirmed |
-| **CLI name** | v6 | `hyperflow-conductor` | Yes — confirmed |
+| **CLI name** | v6 | `workflow-conductor` | Yes — confirmed |
 | **Python tooling** | v6 | uv | Yes |
 | **PR strategy** | v6 | 7 PRs with branch names, file lists, review focus | Yes |
 | **CI pipeline** | v6 | uv + Kind (helm/kind-action) | Yes |
@@ -67,7 +67,7 @@ This plan merges two source plans. The table below shows the origin of each deci
 
 ### System Overview
 
-The HyperFlow Conductor is the "brain" that ties together four existing components:
+The Workflow Conductor is the "brain" that ties together four existing components:
 
 | Component | Role | Interface | Location |
 |---|---|---|---|
@@ -83,7 +83,7 @@ User (natural language)
     |
     v
 +--------------------------+
-|  HyperFlow Conductor     |  <-- THIS PROJECT (mcp-agent pipeline)
+|  Workflow Conductor     |  <-- THIS PROJECT (mcp-agent pipeline)
 |  (outside K8s for MVP)   |
 +----+------+------+-------+
      |      |      |
@@ -103,7 +103,7 @@ User (natural language)
 | 4 | K8s tooling | **subprocess helm/kubectl** for MVP | No mature Python Helm library; matches `fast-test.sh` exactly; kagent-tool-server for later stages |
 | 5 | Runtime location | **Outside K8s** (developer machine) | Simplifies MVP debugging; no pod-level networking complexity |
 | 6 | Workflow delivery | **ConfigMap mount** | Survives pod restarts, unlike `kubectl cp`; matches Helm chart patterns |
-| 7 | Package layout | `src/hyperflow_conductor/` | Standard Python src layout (PEP 517/621) |
+| 7 | Package layout | `src/workflow_conductor/` | Standard Python src layout (PEP 517/621) |
 | 8 | Config | **pydantic-settings** | Type-safe config with env var override and `.env` file support |
 | 9 | CLI | **Click + Rich** | Rich terminal UI for plan display, progress bars, and user prompts |
 | 10 | Statefulness | **Hybrid** — Conductor stateful, Composer stateless | Conductor accumulates artifacts across phases; Composer receives synthesized context per call |
@@ -111,7 +111,7 @@ User (natural language)
 | 12 | Test K8s provider | **Kind** | Already used by HyperFlow project; multi-node support; `pytest-kubernetes` supports both Kind and k3d |
 | 13 | Test K8s assertions | **kr8s** (async Python K8s client) | Ergonomic async assertions in tests; production code uses subprocess helm/kubectl |
 | 14 | Data models | **Pydantic BaseModel** | Type-safe, JSON-serializable via `.model_dump()`, Temporal-compatible, validation built in |
-| 15 | CLI name | **hyperflow-conductor** | Descriptive, matches project repo name |
+| 15 | CLI name | **workflow-conductor** | Descriptive, matches project repo name |
 | 16 | Dev environment | **Devbox** (jetify-com/devbox) | Nix-backed reproducible env; pins kind, helm, kubectl, uv, python 3.11; `devbox shell` gives every developer a ready environment; Docker daemon installed separately at OS level |
 
 ### Academic Grounding
@@ -129,9 +129,9 @@ This work builds on established research in scientific workflow management on Ku
 ## 2. Project Structure
 
 ```
-hyperflow-conductor/
+workflow-conductor/
 ├── src/
-│   └── hyperflow_conductor/
+│   └── workflow_conductor/
 │       ├── __init__.py
 │       ├── app.py                    # MCPApp initialization, main pipeline
 │       ├── cli.py                    # Click CLI entry point
@@ -629,7 +629,7 @@ def create_app(settings: ConductorSettings) -> MCPApp:
             default_model=settings.llm.anthropic_model,
         ) if settings.llm.default_provider == "anthropic" else None,
     )
-    return MCPApp(name="hyperflow-conductor", settings=mcp_settings)
+    return MCPApp(name="workflow-conductor", settings=mcp_settings)
 ```
 
 ### Agent for Workflow Composer
@@ -801,7 +801,7 @@ class ConductorSettings(BaseSettings):
 ## 8. Makefile
 
 ```makefile
-# HyperFlow Conductor — Development Interface
+# Workflow Conductor — Development Interface
 # =============================================
 
 .DEFAULT_GOAL := help
@@ -809,7 +809,7 @@ SHELL := /bin/bash
 
 # Python
 UV := uv
-SRC := src/hyperflow_conductor
+SRC := src/workflow_conductor
 TESTS := tests
 
 # K8s
@@ -870,21 +870,21 @@ coverage: ## Run tests with coverage report
 # --- CLI ---
 .PHONY: run
 run: ## Run conductor with example prompt
-	$(UV) run hyperflow-conductor run \
+	$(UV) run workflow-conductor run \
 		"Analyze frequency of genetic variants across European and East Asian populations for chromosomes 1 through 5. Use moderate parallelism."
 
 .PHONY: run-dry
 run-dry: ## Run conductor in dry-run mode (no K8s deployment)
-	$(UV) run hyperflow-conductor run --dry-run \
+	$(UV) run workflow-conductor run --dry-run \
 		"Analyze frequency of genetic variants across European and East Asian populations for chromosomes 1 through 5."
 
 .PHONY: run-query
 run-query: ## Run with custom prompt (usage: make run-query Q="...")
-	$(UV) run hyperflow-conductor run "$(Q)"
+	$(UV) run workflow-conductor run "$(Q)"
 
 .PHONY: run-debug
 run-debug: ## Run conductor in debug mode
-	HF_CONDUCTOR_LOG_LEVEL=DEBUG $(UV) run hyperflow-conductor run \
+	HF_CONDUCTOR_LOG_LEVEL=DEBUG $(UV) run workflow-conductor run \
 		"Analyze EUR population, chromosome 22, small parallelism."
 
 # --- K8s Cluster ---
@@ -1466,7 +1466,7 @@ Stages 0-2 form the core product. Stages 3-5 make it production-worthy. Stages 6
 **Contents:**
 - `devbox.json` pinning python 3.11, uv, kind, helm, kubectl + `devbox.lock`
 - `pyproject.toml` with dependencies (mcp-agent, click, rich, pydantic-settings, pyyaml, pytest, ruff, mypy)
-- `src/hyperflow_conductor/__init__.py`
+- `src/workflow_conductor/__init__.py`
 - `Makefile` (full version from §8)
 - `mcp_agent.config.yaml` with Composer MCP server config
 - `mcp_agent.secrets.yaml.example`
@@ -1483,8 +1483,8 @@ Stages 0-2 form the core product. Stages 3-5 make it production-worthy. Stages 6
 **Branch:** `feat/models`
 
 **Contents:**
-- `src/hyperflow_conductor/config.py` (ConductorSettings with nested settings classes)
-- `src/hyperflow_conductor/models.py` (PipelineState, PipelinePhase, PipelineStatus, PhaseResult, WorkflowPlan, InfrastructureMeasurements, ResourceProfile, ExecutionSummary, PipelineError, IntentClassification, UserResponse)
+- `src/workflow_conductor/config.py` (ConductorSettings with nested settings classes)
+- `src/workflow_conductor/models.py` (PipelineState, PipelinePhase, PipelineStatus, PhaseResult, WorkflowPlan, InfrastructureMeasurements, ResourceProfile, ExecutionSummary, PipelineError, IntentClassification, UserResponse)
 - `tests/conftest.py` (shared fixtures)
 - `tests/unit/test_models.py` (defaults, record_phase, JSON serialization, context synthesis, no shared mutable defaults, v2 slots)
 - `tests/unit/test_config.py` (env var loading, nested delimiter, defaults)
@@ -1499,11 +1499,11 @@ Stages 0-2 form the core product. Stages 3-5 make it production-worthy. Stages 6
 **Branch:** `feat/k8s-wrappers`
 
 **Contents:**
-- `src/hyperflow_conductor/k8s/__init__.py`
-- `src/hyperflow_conductor/k8s/helm.py` (Helm class: _run, upgrade_install, uninstall, release_exists, list_releases)
-- `src/hyperflow_conductor/k8s/kubectl.py` (Kubectl class: _run, get_json, apply_json, wait_for_ready, wait_for_delete, wait_for_pod, wait_for_job, create_configmap_from_file, create_namespace, create_resource_quota, delete_namespace, logs)
-- `src/hyperflow_conductor/k8s/cluster.py` (Kind cluster management)
-- `src/hyperflow_conductor/k8s/values.py` (generate_helm_values)
+- `src/workflow_conductor/k8s/__init__.py`
+- `src/workflow_conductor/k8s/helm.py` (Helm class: _run, upgrade_install, uninstall, release_exists, list_releases)
+- `src/workflow_conductor/k8s/kubectl.py` (Kubectl class: _run, get_json, apply_json, wait_for_ready, wait_for_delete, wait_for_pod, wait_for_job, create_configmap_from_file, create_namespace, create_resource_quota, delete_namespace, logs)
+- `src/workflow_conductor/k8s/cluster.py` (Kind cluster management)
+- `src/workflow_conductor/k8s/values.py` (generate_helm_values)
 - `tests/unit/test_helm.py`, `tests/unit/test_kubectl.py`, `tests/unit/test_helm_values.py`
 
 **Tests:** Unit tests mock subprocess, verify correct argument construction
@@ -1516,10 +1516,10 @@ Stages 0-2 form the core product. Stages 3-5 make it production-worthy. Stages 6
 **Branch:** `feat/cli`
 
 **Contents:**
-- `src/hyperflow_conductor/cli.py` (Click commands: `run`, `run --dry-run`)
-- `src/hyperflow_conductor/ui/__init__.py`
-- `src/hyperflow_conductor/ui/display.py` (Rich panels, progress bars, completion summary)
-- `src/hyperflow_conductor/ui/prompts.py` (Rich confirmation prompts: approve/refine/abort)
+- `src/workflow_conductor/cli.py` (Click commands: `run`, `run --dry-run`)
+- `src/workflow_conductor/ui/__init__.py`
+- `src/workflow_conductor/ui/display.py` (Rich panels, progress bars, completion summary)
+- `src/workflow_conductor/ui/prompts.py` (Rich confirmation prompts: approve/refine/abort)
 
 **Tests:** Unit tests for CLI argument parsing, display formatting
 **Review focus:** CLI UX, Rich output formatting, validation gate flow
@@ -1531,11 +1531,11 @@ Stages 0-2 form the core product. Stages 3-5 make it production-worthy. Stages 6
 **Branch:** `feat/planning`
 
 **Contents:**
-- `src/hyperflow_conductor/app.py` (MCPApp initialization via create_app, pipeline skeleton)
-- `src/hyperflow_conductor/phases/__init__.py`
-- `src/hyperflow_conductor/phases/routing.py` (Phase 1: hardcoded to 1000genome)
-- `src/hyperflow_conductor/phases/planning.py` (Phase 2: Composer MCP + Agent + AugmentedLLM)
-- `src/hyperflow_conductor/phases/validation.py` (Phase 3: validation gate + refine loop)
+- `src/workflow_conductor/app.py` (MCPApp initialization via create_app, pipeline skeleton)
+- `src/workflow_conductor/phases/__init__.py`
+- `src/workflow_conductor/phases/routing.py` (Phase 1: hardcoded to 1000genome)
+- `src/workflow_conductor/phases/planning.py` (Phase 2: Composer MCP + Agent + AugmentedLLM)
+- `src/workflow_conductor/phases/validation.py` (Phase 3: validation gate + refine loop)
 - `tests/unit/test_phases.py` (mocked MCP tool calls)
 - `tests/integration/test_composer_mcp.py` (real MCP server)
 
@@ -1549,10 +1549,10 @@ Stages 0-2 form the core product. Stages 3-5 make it production-worthy. Stages 6
 **Branch:** `feat/pipeline`
 
 **Contents:**
-- `src/hyperflow_conductor/phases/deployment.py` (Phase 4: full 10-step deploy sequence)
-- `src/hyperflow_conductor/phases/monitoring.py` (Phase 5: basic polling + Rich progress)
-- `src/hyperflow_conductor/phases/completion.py` (Phase 6: teardown + summary)
-- `src/hyperflow_conductor/app.py` (complete pipeline wiring: all 6 phases)
+- `src/workflow_conductor/phases/deployment.py` (Phase 4: full 10-step deploy sequence)
+- `src/workflow_conductor/phases/monitoring.py` (Phase 5: basic polling + Rich progress)
+- `src/workflow_conductor/phases/completion.py` (Phase 6: teardown + summary)
+- `src/workflow_conductor/app.py` (complete pipeline wiring: all 6 phases)
 - Update `cli.py` to call full pipeline
 
 **Tests:** Unit: deployment with mocked helm/kubectl. Integration: full routing->planning->validation with auto_approve.
@@ -1599,7 +1599,7 @@ make install
 make ci                                    # lint + typecheck + unit tests
 
 # 2. Dry-run mode
-hyperflow-conductor run --dry-run \
+workflow-conductor run --dry-run \
   "Analyze frequency of genetic variants across European and East Asian populations \
    for chromosomes 1 through 5. Use moderate parallelism."
 # Expected: Rich panel shows plan, user approves, exits cleanly
@@ -1607,7 +1607,7 @@ hyperflow-conductor run --dry-run \
 # 3. Full pipeline (requires Docker running)
 make cluster-create
 make cluster-load-images
-hyperflow-conductor run \
+workflow-conductor run \
   "Analyze EUR population, chromosome 22, small parallelism."
 # Expected: deploys to Kind, engine pod starts, basic monitoring, completion
 
@@ -1659,7 +1659,7 @@ make cluster-status                        # Verify nothing remains
 ### CLAUDE.md Template
 
 ```markdown
-# HyperFlow Conductor
+# Workflow Conductor
 
 ## What This Is
 AI-powered orchestrator for 1000genome workflows on Kubernetes via HyperFlow WMS.
@@ -1686,11 +1686,11 @@ make setup            # Full setup from scratch (install + cluster + infra)
 
 ## Key Files
 - `devbox.json` — Pinned dev tools (kind, helm, kubectl, uv, python)
-- `src/hyperflow_conductor/app.py` — Main pipeline + MCPApp
-- `src/hyperflow_conductor/phases/` — One file per phase
-- `src/hyperflow_conductor/k8s/` — Helm/kubectl wrappers
-- `src/hyperflow_conductor/models.py` — Pydantic v2 data models
-- `src/hyperflow_conductor/config.py` — pydantic-settings configuration
+- `src/workflow_conductor/app.py` — Main pipeline + MCPApp
+- `src/workflow_conductor/phases/` — One file per phase
+- `src/workflow_conductor/k8s/` — Helm/kubectl wrappers
+- `src/workflow_conductor/models.py` — Pydantic v2 data models
+- `src/workflow_conductor/config.py` — pydantic-settings configuration
 
 ## Design Decisions (Do Not Revisit)
 - Dev environment: Devbox (Nix-backed, pins all CLI tools)
@@ -1873,7 +1873,7 @@ Requires: RabbitMQ, KEDA, Prometheus Adapter.
 
 ```python
 # Pattern 1: MCPApp + Agent + AugmentedLLM
-app = MCPApp(name="hyperflow_conductor", settings=mcp_settings)
+app = MCPApp(name="workflow_conductor", settings=mcp_settings)
 async with app.run():
     planner = Agent(name="planner", instruction="...", server_names=["workflow-composer"])
     async with planner:
@@ -1906,7 +1906,7 @@ LLM_FACTORIES = {"anthropic": AnthropicAugmentedLLM, "google": GoogleAugmentedLL
 
 ```toml
 [project]
-name = "hyperflow-conductor"
+name = "workflow-conductor"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
@@ -1933,7 +1933,7 @@ test = [
 ]
 
 [project.scripts]
-hyperflow-conductor = "hyperflow_conductor.cli:main"
+workflow-conductor = "workflow_conductor.cli:main"
 ```
 
 ### Academic Papers
