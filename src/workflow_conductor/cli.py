@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import click
 
-from workflow_conductor.ui.display import (
-    display_error,
-    display_pipeline_banner,
-)
+from workflow_conductor.app import run_pipeline
+from workflow_conductor.config import ConductorSettings
 
 
 @click.group()
@@ -33,13 +32,24 @@ def main(log_level: str) -> None:
     "prompt",
     default="Analyze EUR population, chromosome 22, small parallelism.",
 )
-@click.option("--dry-run", is_flag=True, help="Plan only, skip K8s deployment.")
-@click.option("--auto-approve", is_flag=True, help="Skip validation gate prompts.")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Plan only, skip K8s deployment.",
+)
+@click.option(
+    "--auto-approve",
+    is_flag=True,
+    help="Skip validation gate prompts.",
+)
 def run(prompt: str, dry_run: bool, auto_approve: bool) -> None:
     """Run the conductor pipeline with a natural language prompt."""
-    display_pipeline_banner(prompt, dry_run=dry_run)
-
-    if dry_run:
-        display_error("Dry-run mode: pipeline execution not yet implemented.")
-    else:
-        display_error("Full pipeline not yet implemented.")
+    settings = ConductorSettings()
+    asyncio.run(
+        run_pipeline(
+            prompt,
+            settings,
+            dry_run=dry_run,
+            auto_approve=auto_approve,
+        )
+    )
