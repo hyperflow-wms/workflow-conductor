@@ -1150,7 +1150,7 @@ jobs:
 
 ## 10. Implementation Stages
 
-### Stage 0: Project Bootstrap & Infrastructure Validation
+### Stage 0: Project Bootstrap & Infrastructure Validation ✅ COMPLETED
 
 **Goal:** Set up project skeleton, tooling, and verify all external dependencies work before writing any pipeline code.
 
@@ -1180,7 +1180,7 @@ jobs:
 
 ---
 
-### Stage 1: MVP — End-to-End Pipeline
+### Stage 1: MVP — End-to-End Pipeline ✅ COMPLETED
 
 **Goal:** NL prompt -> plan -> user approval -> deployed workflow on Kind -> monitoring -> completion
 
@@ -1444,8 +1444,8 @@ async def phase_learn(state, result):
 ### Priority Order
 
 ```
-Stage 0: Bootstrap (project skeleton + dependency validation)       -- Must have
-Stage 1: MVP (end-to-end pipeline + validation)                     -- Must have
+Stage 0: Bootstrap (project skeleton + dependency validation)       -- Must have   ✅ DONE
+Stage 1: MVP (end-to-end pipeline + validation)                     -- Must have   ✅ DONE
 Stage 2: Deferred generation + error handling                       -- Must have (robust execution)
 Stage 3: Resource profiling                                         -- Should have (quality of execution)
 Stage 4: Execution Sentinel                                         -- Should have (operational awareness)
@@ -1460,7 +1460,7 @@ Stages 0-2 form the core product. Stages 3-5 make it production-worthy. Stages 6
 
 ## 11. PR Breakdown for Stage 1
 
-### PR 1.1: Project Scaffolding
+### PR 1.1: Project Scaffolding ✅ MERGED → `v0.1.0-scaffold`
 **Branch:** `feat/scaffold`
 
 **Contents:**
@@ -1479,7 +1479,7 @@ Stages 0-2 form the core product. Stages 3-5 make it production-worthy. Stages 6
 
 ---
 
-### PR 1.2: Models + Config
+### PR 1.2: Models + Config ✅ MERGED → `v0.1.0-models`
 **Branch:** `feat/models`
 
 **Contents:**
@@ -1495,7 +1495,7 @@ Stages 0-2 form the core product. Stages 3-5 make it production-worthy. Stages 6
 
 ---
 
-### PR 1.3: K8s Wrappers (Helm + kubectl)
+### PR 1.3: K8s Wrappers (Helm + kubectl) ✅ MERGED → `v0.1.0-k8s-wrappers`
 **Branch:** `feat/k8s-wrappers`
 
 **Contents:**
@@ -1512,7 +1512,7 @@ Stages 0-2 form the core product. Stages 3-5 make it production-worthy. Stages 6
 
 ---
 
-### PR 1.4: CLI + Rich Terminal UI
+### PR 1.4: CLI + Rich Terminal UI ✅ MERGED → `v0.1.0-cli`
 **Branch:** `feat/cli`
 
 **Contents:**
@@ -1527,7 +1527,7 @@ Stages 0-2 form the core product. Stages 3-5 make it production-worthy. Stages 6
 
 ---
 
-### PR 1.5: Planning Phase + MCP Integration
+### PR 1.5: Planning Phase + MCP Integration ✅ MERGED → `v0.1.0-planning`
 **Branch:** `feat/planning`
 
 **Contents:**
@@ -1545,7 +1545,7 @@ Stages 0-2 form the core product. Stages 3-5 make it production-worthy. Stages 6
 
 ---
 
-### PR 1.6: Deployment + Monitoring + Pipeline Wiring
+### PR 1.6: Deployment + Monitoring + Pipeline Wiring ✅ MERGED → `v0.1.0-pipeline`
 **Branch:** `feat/pipeline`
 
 **Contents:**
@@ -1561,7 +1561,7 @@ Stages 0-2 form the core product. Stages 3-5 make it production-worthy. Stages 6
 
 ---
 
-### PR 1.7: Integration + E2E Tests on Kind
+### PR 1.7: Integration + E2E Tests on Kind ✅ MERGED → `v0.1.0-e2e-tests`
 **Branch:** `feat/e2e-tests`
 
 **Contents:**
