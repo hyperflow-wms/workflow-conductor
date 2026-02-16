@@ -1252,7 +1252,7 @@ ROUTING -> PLANNING -> VALIDATION (Gate 1) -> PROVISIONING -> GENERATION -> APPR
 
 ---
 
-### Stage 2.5: E2E Test Validation — Prove the Pipeline Runs
+### Stage 2.5: E2E Test Validation — Prove the Pipeline Runs ✅ COMPLETED
 
 **Goal:** Fix all config/fixture/assertion gaps so that `make test-integration` (no LLM tokens) and `make test-e2e` (with LLM tokens) actually pass against real infrastructure.
 
