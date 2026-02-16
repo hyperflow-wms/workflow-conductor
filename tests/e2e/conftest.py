@@ -6,8 +6,12 @@ import os
 import shutil
 
 import pytest
+from dotenv import load_dotenv
 
 from workflow_conductor.config import ConductorSettings
+
+# Load .env into os.environ so guard fixtures can see API keys
+load_dotenv()
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
