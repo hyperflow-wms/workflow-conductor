@@ -1218,9 +1218,17 @@ jobs:
 
 ---
 
-### Stage 2: Deferred Generation + Error Handling
+### Stage 2: Deferred Generation + Error Handling ✅ COMPLETED
 
 **Goal:** Split generation from interpretation, add infrastructure measurements, and basic structured error handling.
+
+**Completed PRs:**
+- PR 2.1: Models & Enum Extension (`v0.2.0-stage2-models`)
+- PR 2.2: Structured Error Handling & Retry Logic (`v0.2.0-error-handling`)
+- PR 2.3: Provisioning Phase (`v0.2.0-provisioning`)
+- PR 2.4: Generation Phase (`v0.2.0-generation`)
+- PR 2.5: Approval Phase / Gate 2 (`v0.2.0-approval`)
+- PR 2.6: Pipeline Rewiring & Deployment Slimming (`v0.2.0-pipeline-rewire`)
 
 **Scope:**
 - New phase file: `phases/provisioning.py` — data staging + infrastructure measurement (query vCPUs, memory, actual data sizes on NFS volume)
