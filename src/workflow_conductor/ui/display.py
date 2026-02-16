@@ -107,26 +107,51 @@ def display_completion_summary(state: PipelineState) -> None:
 
 def display_execution_preview(state: PipelineState) -> None:
     """Display execution preview with real task counts and resource info."""
+    import json
+    import re
+
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("Key", style="bold")
     table.add_column("Value")
 
     if state.workflow_json:
-        processes = state.workflow_json.get("processes", [])
-        table.add_row("Total Tasks", str(len(processes)))
+        # workflow.json size
+        json_bytes = len(json.dumps(state.workflow_json).encode())
+        if json_bytes >= 1024 * 1024:
+            size_str = f"{json_bytes / (1024 * 1024):.1f} MB"
+        elif json_bytes >= 1024:
+            size_str = f"{json_bytes / 1024:.0f} KB"
+        else:
+            size_str = f"{json_bytes} B"
+        table.add_row("Workflow JSON Size", size_str)
 
-        # Count by task type prefix
+        processes = state.workflow_json.get("processes", [])
+        table.add_row("Total Processes", str(len(processes)))
+
+        # Count by task type prefix and collect chromosomes
         type_counts: dict[str, int] = {}
+        chromosomes: set[str] = set()
         for proc in processes:
             name = proc.get("name", "")
             # Extract type from name like "individuals_chr22_1" → "individuals"
             task_type = name.split("_")[0] if "_" in name else name
             type_counts[task_type] = type_counts.get(task_type, 0) + 1
+            # Extract chromosome from name like "individuals_chr22_1"
+            chr_match = re.search(r"chr(\d+|[XY])", name)
+            if chr_match:
+                chromosomes.add(chr_match.group(1))
         for task_type, count in sorted(type_counts.items()):
             table.add_row(f"  {task_type}", str(count))
 
         signals = state.workflow_json.get("signals", [])
         table.add_row("Signals", str(len(signals)))
+
+        if chromosomes:
+            sorted_chrs = sorted(
+                chromosomes,
+                key=lambda c: (not c.isdigit(), int(c) if c.isdigit() else 0, c),
+            )
+            table.add_row("Chromosomes", ", ".join(sorted_chrs))
 
     if state.infrastructure:
         table.add_row("Nodes", str(state.infrastructure.node_count))
