@@ -14,15 +14,18 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class PipelinePhase(StrEnum):
-    """Pipeline phases for the MVP 6-phase architecture.
+    """Pipeline phases — 9-phase architecture (Stage 2).
 
-    Additional phases (PROFILING, PROVISIONING, WORKFLOW_GENERATION,
-    EXECUTION_APPROVAL) are added in later stages.
+    Phases PROVISIONING, GENERATION, and APPROVAL added in Stage 2
+    between VALIDATION and DEPLOYMENT.
     """
 
     ROUTING = "routing"
     PLANNING = "planning"
     VALIDATION = "validation"
+    PROVISIONING = "provisioning"
+    GENERATION = "generation"
+    APPROVAL = "approval"
     DEPLOYMENT = "deployment"
     MONITORING = "monitoring"
     COMPLETION = "completion"
@@ -78,6 +81,19 @@ class InfrastructureMeasurements(BaseModel):
     storage_class: str = ""
 
 
+class ChromosomeData(BaseModel):
+    """Per-chromosome data for workflow generation.
+
+    Feeds into the Composer's generate_workflow tool. Row counts may be
+    estimated (via estimate_variants) or exact (from staged file scanning).
+    """
+
+    vcf_file: str
+    row_count: int
+    annotation_file: str
+    chromosome: str
+
+
 class ResourceProfile(BaseModel):
     """Per-task-type resource recommendations."""
 
@@ -108,6 +124,14 @@ class PipelineError(BaseModel):
     timestamp: str = ""
     recoverable: bool = True
     suggested_action: str = ""
+
+
+class RetryPolicy(BaseModel):
+    """Configuration for phase retry behavior."""
+
+    max_retries: int = 3
+    backoff_base: float = 2.0
+    retryable_errors: list[str] = Field(default_factory=list)
 
 
 class IntentClassification(BaseModel):
@@ -157,6 +181,7 @@ class PipelineState(BaseModel):
     workflow_plan: WorkflowPlan | None = None
     resource_profiles: list[ResourceProfile] = Field(default_factory=list)
     infrastructure: InfrastructureMeasurements | None = None
+    chromosome_data: list[ChromosomeData] = Field(default_factory=list)
     workflow_json: dict[str, Any] | None = None
     workflow_json_path: str = ""
     execution_summary: ExecutionSummary | None = None
