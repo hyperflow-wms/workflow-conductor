@@ -22,11 +22,13 @@ async def run_approval_phase(
     state: PipelineState,
     *,
     auto_approve: bool = False,
+    max_processes: int = 200,
 ) -> PipelineState:
     """Present execution preview and prompt for deployment approval.
 
     Requires workflow_json to be populated (from generation phase).
     Sets state.user_approved_execution and state.total_task_count.
+    Rejects workflows exceeding max_processes.
     """
     display_phase_header(PipelinePhase.APPROVAL)
 
@@ -36,6 +38,15 @@ async def run_approval_phase(
     # Extract task count from workflow
     processes = state.workflow_json.get("processes", [])
     state.total_task_count = len(processes)
+
+    # Guard: reject oversized workflows
+    if state.total_task_count > max_processes:
+        raise ValueError(
+            f"Workflow has {state.total_task_count} processes, exceeding "
+            f"the limit of {max_processes}. The LLM likely generated a "
+            f"workflow for too many chromosomes. Re-run or increase "
+            f"HF_CONDUCTOR_MAX_WORKFLOW_PROCESSES."
+        )
 
     # Show preview
     display_execution_preview(state)

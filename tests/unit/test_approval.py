@@ -107,3 +107,27 @@ class TestApprovalPhase:
 
         result = await run_approval_phase(state_after_generation, auto_approve=True)
         assert result.total_task_count == 6
+
+    @pytest.mark.asyncio
+    async def test_rejects_oversized_workflow(self) -> None:
+        big_processes = [{"name": f"task_{i}"} for i in range(300)]
+        state = PipelineState(
+            current_phase=PipelinePhase.APPROVAL,
+            workflow_json={"name": "test", "processes": big_processes, "signals": []},
+        )
+        from workflow_conductor.phases.approval import run_approval_phase
+
+        with pytest.raises(ValueError, match="exceeding the limit"):
+            await run_approval_phase(state, auto_approve=True, max_processes=200)
+
+    @pytest.mark.asyncio
+    async def test_accepts_workflow_at_limit(
+        self, state_after_generation: PipelineState
+    ) -> None:
+        from workflow_conductor.phases.approval import run_approval_phase
+
+        # 6 processes, limit=6 — should pass
+        result = await run_approval_phase(
+            state_after_generation, auto_approve=True, max_processes=6
+        )
+        assert result.user_approved_execution is True

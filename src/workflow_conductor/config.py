@@ -85,5 +85,6 @@ class ConductorSettings(BaseSettings):
     verbose: bool = False
     demo: bool = False
     log_level: str = "INFO"
+    max_workflow_processes: int = 200
     monitor_poll_interval: int = 10
     monitor_timeout: int = 3600

@@ -211,6 +211,7 @@ async def run_pipeline(
             state,
             run_approval_phase,
             auto_approve=auto_approve or settings.auto_approve,
+            max_processes=settings.max_workflow_processes,
         )
         if demo:
             demo_pause()
