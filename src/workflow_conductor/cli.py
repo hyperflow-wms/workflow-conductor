@@ -42,7 +42,12 @@ def main(log_level: str) -> None:
     is_flag=True,
     help="Skip validation gate prompts.",
 )
-def run(prompt: str, dry_run: bool, auto_approve: bool) -> None:
+@click.option(
+    "--demo",
+    is_flag=True,
+    help="Demo mode with explanations and pauses.",
+)
+def run(prompt: str, dry_run: bool, auto_approve: bool, demo: bool) -> None:
     """Run the conductor pipeline with a natural language prompt."""
     settings = ConductorSettings()
     asyncio.run(
@@ -51,5 +56,6 @@ def run(prompt: str, dry_run: bool, auto_approve: bool) -> None:
             settings,
             dry_run=dry_run,
             auto_approve=auto_approve,
+            demo=demo,
         )
     )

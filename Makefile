@@ -79,6 +79,11 @@ run-dry: ## Run conductor in dry-run mode (no K8s deployment)
 run-query: ## Run with custom prompt (usage: make run-query Q="...")
 	$(UV) run workflow-conductor run "$(Q)"
 
+.PHONY: demo
+demo: ## Run conductor in demo mode (explanations + pauses)
+	$(UV) run workflow-conductor run --demo --auto-approve \
+		"Do European and African populations show different patterns of shared deleterious mutations on chromosome 22?"
+
 .PHONY: run-debug
 run-debug: ## Run conductor in debug mode
 	HF_CONDUCTOR_LOG_LEVEL=DEBUG $(UV) run workflow-conductor run \

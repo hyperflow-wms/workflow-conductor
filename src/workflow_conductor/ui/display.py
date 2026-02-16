@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -16,9 +18,15 @@ from workflow_conductor.models import (
 console = Console()
 
 
-def display_pipeline_banner(prompt: str, *, dry_run: bool = False) -> None:
+def display_pipeline_banner(
+    prompt: str, *, dry_run: bool = False, demo: bool = False
+) -> None:
     """Show the initial pipeline banner with the user prompt."""
-    mode = "[bold yellow]DRY RUN[/bold yellow] " if dry_run else ""
+    mode = ""
+    if dry_run:
+        mode = "[bold yellow]DRY RUN[/bold yellow] "
+    elif demo:
+        mode = "[bold magenta]DEMO MODE[/bold magenta] "
     console.print(
         Panel(
             f"[bold]{prompt}[/bold]",
@@ -141,3 +149,99 @@ def display_error(message: str, *, phase: str = "") -> None:
     """Display an error message."""
     prefix = f"\\[{phase}] " if phase else ""
     console.print(f"[bold red]{prefix}{message}[/bold red]")
+
+
+# --- Demo mode display functions ---
+
+_PHASE_EXPLANATIONS: dict[PipelinePhase, str] = {
+    PipelinePhase.ROUTING: (
+        "Classifies the natural-language prompt to select the right "
+        "workflow type. Currently routes all genomics prompts to the "
+        "1000 Genomes pipeline."
+    ),
+    PipelinePhase.PLANNING: (
+        "The LLM calls the Workflow Composer MCP server to analyze the "
+        "research question and create a workflow plan.\n"
+        "Watch for: plan_workflow and estimate_variants tool calls."
+    ),
+    PipelinePhase.VALIDATION: (
+        "Gate 1: presents the workflow plan for review. In auto-approve "
+        "mode the plan is accepted automatically. Otherwise the user can "
+        "approve, refine, or abort."
+    ),
+    PipelinePhase.PROVISIONING: (
+        "Sets up Kubernetes infrastructure: creates namespace, deploys "
+        "hf-ops (NFS server, Redis), waits for data staging to complete."
+    ),
+    PipelinePhase.GENERATION: (
+        "The LLM calls the Workflow Composer to generate the full "
+        "workflow.json — the HyperFlow DAG of processes and signals.\n"
+        "Watch for: generate_workflow tool call."
+    ),
+    PipelinePhase.APPROVAL: (
+        "Gate 2: shows an execution preview with real task counts and "
+        "resource info. In auto-approve mode the execution is approved "
+        "automatically."
+    ),
+    PipelinePhase.DEPLOYMENT: (
+        "Deploys the workflow to Kubernetes: creates the workflow.json "
+        "ConfigMap, installs the hf-run Helm chart (HyperFlow engine + "
+        "workers)."
+    ),
+    PipelinePhase.MONITORING: (
+        "Polls Kubernetes for job completion status. Tracks completed "
+        "and failed jobs until all tasks finish or a timeout is reached."
+    ),
+    PipelinePhase.COMPLETION: (
+        "Builds the execution summary, optionally tears down the "
+        "namespace. In demo mode teardown is skipped so you can inspect "
+        "the cluster."
+    ),
+}
+
+
+def display_phase_explanation(phase: PipelinePhase) -> None:
+    """Show a demo-mode explanation panel for a pipeline phase."""
+    text = _PHASE_EXPLANATIONS.get(phase, phase.value)
+    console.print(
+        Panel(
+            text,
+            title=f"[bold magenta]{phase.value.title()}[/bold magenta]",
+            border_style="magenta",
+        )
+    )
+
+
+def display_workflow_json_summary(workflow_json: dict[str, Any]) -> None:
+    """Show a summary of the generated workflow.json."""
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_column("Key", style="bold")
+    table.add_column("Value")
+
+    processes: list[Any] = workflow_json.get("processes", [])
+    table.add_row("Total Processes", str(len(processes)))
+
+    # Count by task type prefix
+    type_counts: dict[str, int] = {}
+    for proc in processes:
+        name = proc.get("name", "")
+        task_type = name.split("_")[0] if "_" in name else name
+        type_counts[task_type] = type_counts.get(task_type, 0) + 1
+    for task_type, count in sorted(type_counts.items()):
+        table.add_row(f"  {task_type}", str(count))
+
+    signals: list[Any] = workflow_json.get("signals", [])
+    table.add_row("Signals", str(len(signals)))
+
+    console.print(
+        Panel(
+            table,
+            title="[bold green]Workflow JSON Summary[/bold green]",
+            border_style="green",
+        )
+    )
+
+
+def demo_pause(message: str = "Press Enter to continue...") -> None:
+    """Block until the presenter presses Enter."""
+    console.input(f"\n[dim]{message}[/dim]")

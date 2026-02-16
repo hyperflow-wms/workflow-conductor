@@ -83,6 +83,7 @@ class ConductorSettings(BaseSettings):
     auto_teardown: bool = False
     skip_profiler: bool = True
     verbose: bool = False
+    demo: bool = False
     log_level: str = "INFO"
     monitor_poll_interval: int = 10
     monitor_timeout: int = 3600
