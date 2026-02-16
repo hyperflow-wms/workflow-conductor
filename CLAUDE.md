@@ -120,6 +120,11 @@ HF_CONDUCTOR_LLM__DEFAULT_PROVIDER=google
 - **After creating a PR**: Run `/code-review:code-review` to self-review the PR before requesting human review
 - **After merging a PR**: Always create an annotated git tag (e.g., `v0.1.0-models`) so we can return to that project state later
 
+## Testing Conventions
+
+- **After every PR** (before code review): `make ci` (unit tests + lint + typecheck) + `make test-integration` (K8s tests on Kind, no LLM tokens)
+- **After every completed stage**: `make test-e2e` (full pipeline with real LLM tokens + Kind cluster)
+
 ## Implementation Plan
 
 See `docs/implementation-plan.md` for the full plan (8 stages, 7 PRs for Stage 1). Stages 0-2 are core, 3-5 production-worthy, 6-7 refinements.
