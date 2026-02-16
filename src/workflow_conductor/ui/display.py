@@ -34,10 +34,13 @@ def display_phase_header(phase: PipelinePhase) -> None:
     labels = {
         PipelinePhase.ROUTING: "Phase 1: Routing",
         PipelinePhase.PLANNING: "Phase 2: Planning",
-        PipelinePhase.VALIDATION: "Phase 3: Validation",
-        PipelinePhase.DEPLOYMENT: "Phase 4: Deployment",
-        PipelinePhase.MONITORING: "Phase 5: Monitoring",
-        PipelinePhase.COMPLETION: "Phase 6: Completion",
+        PipelinePhase.VALIDATION: "Phase 3: Validation (Gate 1)",
+        PipelinePhase.PROVISIONING: "Phase 4: Provisioning",
+        PipelinePhase.GENERATION: "Phase 5: Generation",
+        PipelinePhase.APPROVAL: "Phase 6: Approval (Gate 2)",
+        PipelinePhase.DEPLOYMENT: "Phase 7: Deployment",
+        PipelinePhase.MONITORING: "Phase 8: Monitoring",
+        PipelinePhase.COMPLETION: "Phase 9: Completion",
     }
     label = labels.get(phase, phase.value)
     console.rule(f"[bold blue]{label}[/bold blue]")

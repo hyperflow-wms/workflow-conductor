@@ -20,15 +20,17 @@ from workflow_conductor.models import (
     PipelineState,
     PipelineStatus,
 )
+from workflow_conductor.phases.approval import run_approval_phase
 from workflow_conductor.phases.completion import run_completion_phase
 from workflow_conductor.phases.deployment import run_deployment_phase
+from workflow_conductor.phases.generation import run_generation_phase
 from workflow_conductor.phases.monitoring import run_monitoring_phase
 from workflow_conductor.phases.planning import run_planning_phase
+from workflow_conductor.phases.provisioning import run_provisioning_phase
 from workflow_conductor.phases.routing import run_routing_phase
 from workflow_conductor.phases.validation import run_validation_phase
 from workflow_conductor.ui.display import (
     display_error,
-    display_phase_header,
     display_pipeline_banner,
 )
 
@@ -99,12 +101,13 @@ async def run_pipeline(
     dry_run: bool = False,
     auto_approve: bool = False,
 ) -> PipelineState:
-    """Execute the full 6-phase pipeline.
+    """Execute the full 9-phase pipeline.
 
-    Phases: ROUTING -> PLANNING -> VALIDATION -> DEPLOYMENT
-            -> MONITORING -> COMPLETION
+    Phases: ROUTING -> PLANNING -> VALIDATION (Gate 1) -> PROVISIONING
+            -> GENERATION -> APPROVAL (Gate 2) -> DEPLOYMENT -> MONITORING
+            -> COMPLETION
 
-    If dry_run is True, stops after VALIDATION.
+    If dry_run is True, stops after VALIDATION (Gate 1).
     """
     state = PipelineState(
         user_prompt=prompt,
@@ -121,13 +124,11 @@ async def run_pipeline(
         state = await _run_phase(PipelinePhase.ROUTING, state, run_routing_phase)
 
         # Phase 2: Planning
-        display_phase_header(PipelinePhase.PLANNING)
         state = await _run_phase(
             PipelinePhase.PLANNING, state, run_planning_phase, settings
         )
 
-        # Phase 3: Validation
-        display_phase_header(PipelinePhase.VALIDATION)
+        # Phase 3: Validation (Gate 1)
         state = await _run_phase(
             PipelinePhase.VALIDATION,
             state,
@@ -136,7 +137,7 @@ async def run_pipeline(
         )
 
         if state.status == PipelineStatus.ABORTED:
-            logger.info("Pipeline aborted by user")
+            logger.info("Pipeline aborted by user at Gate 1")
             return state
 
         if dry_run:
@@ -148,7 +149,39 @@ async def run_pipeline(
             logger.info("Plan not approved, stopping pipeline")
             return state
 
-        # Phase 4: Deployment
+        # Phase 4: Provisioning
+        state = await _run_phase(
+            PipelinePhase.PROVISIONING,
+            state,
+            run_provisioning_phase,
+            settings,
+        )
+
+        # Phase 5: Generation
+        state = await _run_phase(
+            PipelinePhase.GENERATION,
+            state,
+            run_generation_phase,
+            settings,
+        )
+
+        # Phase 6: Approval (Gate 2)
+        state = await _run_phase(
+            PipelinePhase.APPROVAL,
+            state,
+            run_approval_phase,
+            auto_approve=auto_approve or settings.auto_approve,
+        )
+
+        if state.status == PipelineStatus.ABORTED:
+            logger.info("Pipeline aborted by user at Gate 2")
+            return state
+
+        if not state.user_approved_execution:
+            logger.info("Execution not approved, stopping pipeline")
+            return state
+
+        # Phase 7: Deployment
         state = await _run_phase(
             PipelinePhase.DEPLOYMENT,
             state,
@@ -156,7 +189,7 @@ async def run_pipeline(
             settings,
         )
 
-        # Phase 5: Monitoring
+        # Phase 8: Monitoring
         state = await _run_phase(
             PipelinePhase.MONITORING,
             state,
@@ -164,7 +197,7 @@ async def run_pipeline(
             settings,
         )
 
-        # Phase 6: Completion
+        # Phase 9: Completion
         state = await _run_phase(
             PipelinePhase.COMPLETION,
             state,

@@ -55,14 +55,20 @@ make teardown-all         # Full cleanup (cluster + releases)
 
 ## Architecture
 
-6-phase MVP pipeline (later stages add more phases):
+9-phase pipeline (Stage 2):
 
 ```
-NL Prompt → ROUTING → PLANNING → VALIDATION → DEPLOYMENT → MONITORING → COMPLETION
-              │          │           │              │            │            │
-           hardcoded   Composer    Rich UI      Kind+Helm    poll K8s    teardown+
-           to 1000g    MCP tools   approve/     10-step      job status  summary
-                       via Agent   refine/abort  deploy seq
+NL Prompt → ROUTING → PLANNING → VALIDATION (Gate 1) → PROVISIONING → GENERATION
+              │          │           │                      │              │
+           hardcoded   Composer    Rich UI              Kind+Helm      Composer
+           to 1000g    MCP tools   approve/             infra setup    MCP tool
+                       via Agent   refine/abort         + data stage   workflow.json
+
+         → APPROVAL (Gate 2) → DEPLOYMENT → MONITORING → COMPLETION
+              │                    │            │            │
+           Rich UI              ConfigMap     poll K8s    teardown+
+           approve/abort        + hf-run      job status  summary
+           real task counts     Helm install
 ```
 
 ### Key Patterns

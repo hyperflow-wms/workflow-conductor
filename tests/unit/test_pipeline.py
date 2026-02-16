@@ -42,7 +42,7 @@ class TestRunPipeline:
         assert state.namespace == ""
 
     @pytest.mark.asyncio
-    async def test_abort_stops_pipeline(self) -> None:
+    async def test_abort_at_gate1_stops_pipeline(self) -> None:
         mock_llm = AsyncMock()
         mock_llm.generate_str.return_value = '{"description": "test"}'
         mock_llm.conversation_history = []
@@ -68,3 +68,105 @@ class TestRunPipeline:
             )
 
         assert state.status == PipelineStatus.ABORTED
+
+    @pytest.mark.asyncio
+    async def test_abort_at_gate2_stops_pipeline(self) -> None:
+        """After provisioning+generation, user aborts at Gate 2."""
+        mock_llm = AsyncMock()
+        mock_llm.generate_str.return_value = '{"description": "test"}'
+        mock_llm.conversation_history = []
+
+        mock_agent = MagicMock()
+        mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+        mock_agent.__aexit__ = AsyncMock(return_value=False)
+        mock_agent.attach_llm = AsyncMock(return_value=mock_llm)
+
+        # Generation phase also needs an Agent mock that returns workflow JSON
+        gen_llm = AsyncMock()
+        gen_llm.generate_str.return_value = (
+            '{"name": "test", "processes": [{"name": "t1"}], "signals": []}'
+        )
+        gen_llm.conversation_history = []
+
+        gen_agent = MagicMock()
+        gen_agent.__aenter__ = AsyncMock(return_value=gen_agent)
+        gen_agent.__aexit__ = AsyncMock(return_value=False)
+        gen_agent.attach_llm = AsyncMock(return_value=gen_llm)
+
+        with (
+            patch(
+                "workflow_conductor.phases.planning.Agent",
+                return_value=mock_agent,
+            ),
+            patch(
+                "workflow_conductor.phases.generation.Agent",
+                return_value=gen_agent,
+            ),
+            patch("workflow_conductor.phases.provisioning.Kubectl") as MockKubectl,
+            patch("workflow_conductor.phases.provisioning.Helm") as MockHelm,
+            patch("workflow_conductor.phases.provisioning.KindCluster") as MockKind,
+            patch(
+                "workflow_conductor.phases.approval.prompt_execution_gate",
+                return_value=UserResponse(action="abort"),
+            ),
+        ):
+            # Set up provisioning mocks
+            kubectl = MockKubectl.return_value
+            kubectl.create_namespace = AsyncMock()
+            kubectl.create_resource_quota = AsyncMock()
+            kubectl.wait_for_job = AsyncMock()
+            kubectl.get_nodes = AsyncMock(
+                return_value={
+                    "node_count": 2,
+                    "total_cpu": 4,
+                    "total_memory_gb": 8.0,
+                    "k8s_version": "v1.30.0",
+                }
+            )
+
+            helm = MockHelm.return_value
+            helm.upgrade_install = AsyncMock()
+
+            kind = MockKind.return_value
+            kind.exists = AsyncMock(return_value=True)
+            kind.use_context = AsyncMock()
+
+            state = await run_pipeline(
+                "test prompt",
+                ConductorSettings(),
+                auto_approve=True,
+            )
+
+        assert state.status == PipelineStatus.ABORTED
+        assert state.user_approved_plan is True
+        assert state.user_approved_execution is False
+        # Deployment should NOT have run
+        assert state.helm_release_name == ""
+
+    @pytest.mark.asyncio
+    async def test_nine_phase_labels_in_results(self) -> None:
+        """Dry run records phases 1-3 in phase_results."""
+        mock_llm = AsyncMock()
+        mock_llm.generate_str.return_value = '{"description": "test"}'
+        mock_llm.conversation_history = []
+
+        mock_agent = MagicMock()
+        mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+        mock_agent.__aexit__ = AsyncMock(return_value=False)
+        mock_agent.attach_llm = AsyncMock(return_value=mock_llm)
+
+        with patch(
+            "workflow_conductor.phases.planning.Agent",
+            return_value=mock_agent,
+        ):
+            state = await run_pipeline(
+                "test prompt",
+                ConductorSettings(),
+                dry_run=True,
+                auto_approve=True,
+            )
+
+        phase_names = [r.phase.value for r in state.phase_results]
+        assert "routing" in phase_names
+        assert "planning" in phase_names
+        assert "validation" in phase_names

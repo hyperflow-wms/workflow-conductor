@@ -1,6 +1,10 @@
-"""Phase 4: Deployment — full 10-step deploy sequence on K8s.
+"""Phase 7: Deployment — deploy workflow on pre-provisioned K8s infrastructure.
 
-Replicates fast-test.sh programmatically using async subprocess wrappers.
+After provisioning (steps 0-5) and generation (workflow.json), deployment:
+- Cleans previous hf-run release
+- Creates workflow.json ConfigMap
+- Installs hf-run chart
+- Waits for engine pod readiness
 """
 
 from __future__ import annotations
@@ -8,11 +12,10 @@ from __future__ import annotations
 import json
 import logging
 import tempfile
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from workflow_conductor.k8s import Helm, KindCluster, Kubectl, generate_helm_values
+from workflow_conductor.k8s import Helm, Kubectl, generate_helm_values
 from workflow_conductor.models import PipelinePhase, PipelineState
 from workflow_conductor.ui.display import display_phase_header
 
@@ -26,99 +29,29 @@ async def run_deployment_phase(
     state: PipelineState,
     settings: ConductorSettings,
 ) -> PipelineState:
-    """Execute the full K8s deployment sequence.
+    """Deploy the workflow on pre-provisioned K8s infrastructure.
 
-    Steps 0-9 mirror fast-test.sh:
-    0. Ensure Kind cluster exists
-    1. Create namespace
-    2. Install hf-ops (infrastructure)
-    3. Create ResourceQuota
-    4. Stage data via hf-data
-    5. Wait for data staging
-    6. Clean up previous hf-run
-    7. Create workflow.json ConfigMap
-    8. Install hf-run
-    9. Wait for engine pod readiness
+    Requires state.namespace and state.cluster_ready from provisioning.
+    Requires state.workflow_json from generation.
     """
     display_phase_header(PipelinePhase.DEPLOYMENT)
 
+    if not state.namespace:
+        raise ValueError(
+            "Cannot deploy: namespace not set (provisioning phase required)"
+        )
+    if not state.cluster_ready:
+        raise ValueError(
+            "Cannot deploy: cluster not ready (provisioning phase required)"
+        )
+
+    namespace = state.namespace
     kubectl = Kubectl(kubeconfig=settings.kubernetes.kubeconfig)
     helm = Helm(kubeconfig=settings.kubernetes.kubeconfig)
-
-    # Generate namespace
-    ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    namespace = f"{settings.kubernetes.namespace_prefix}-{ts}"
-    state.namespace = namespace
-
     charts_path = settings.hyperflow_k8s_deployment_path
 
-    # Step 0: Ensure Kind cluster
-    if settings.kubernetes.cluster_provider == "kind":
-        cluster = KindCluster(
-            name=settings.kubernetes.cluster_name,
-            config=settings.kubernetes.kind_config,
-        )
-        if not await cluster.exists():
-            logger.info("Creating Kind cluster: %s", cluster.name)
-            await cluster.create()
-            for image in [
-                settings.hf_engine_image,
-                settings.worker_image,
-                settings.data_image,
-            ]:
-                await cluster.load_image(image)
-        await cluster.use_context()
-    state.cluster_ready = True
-
-    # Step 1: Create namespace
-    logger.info("Step 1: Creating namespace %s", namespace)
-    await kubectl.create_namespace(namespace)
-
-    # Step 2: Install hf-ops
-    logger.info("Step 2: Installing hf-ops")
-    ops_chart = str(Path(charts_path) / "charts" / "hyperflow-ops")
-    ops_values = [settings.helm.ops_values] if settings.helm.ops_values else []
-    await helm.upgrade_install(
-        "hf-ops",
-        ops_chart,
-        namespace=namespace,
-        values_files=ops_values,
-        dependency_update=True,
-        wait=True,
-        timeout=settings.helm.timeout_ops,
-    )
-
-    # Step 3: Create ResourceQuota
-    logger.info("Step 3: Creating ResourceQuota")
-    await kubectl.create_resource_quota(
-        "hflow-requests",
-        namespace=namespace,
-        hard_cpu=settings.resource_quota_cpu,
-        hard_memory=settings.resource_quota_memory,
-    )
-
-    # Step 4: Stage data
-    logger.info("Step 4: Staging data via hf-data")
-    data_chart = str(Path(charts_path) / "charts" / "hyperflow-nfs-data")
-    await helm.upgrade_install(
-        "hf-data",
-        data_chart,
-        namespace=namespace,
-        set_values={
-            "workflow.image": settings.data_image,
-        },
-    )
-
-    # Step 5: Wait for data staging
-    logger.info("Step 5: Waiting for data staging job")
-    await kubectl.wait_for_job(
-        "hf-data",
-        namespace=namespace,
-        timeout=300,
-    )
-
-    # Step 6: Clean up previous hf-run
-    logger.info("Step 6: Cleaning up previous hf-run")
+    # Step 1: Clean up previous hf-run
+    logger.info("Step 1: Cleaning up previous hf-run")
     if await helm.release_exists("hf-run", namespace=namespace):
         await helm.uninstall("hf-run", namespace=namespace)
         await kubectl.wait_for_delete(
@@ -128,8 +61,8 @@ async def run_deployment_phase(
             timeout=60,
         )
 
-    # Step 7: Inject workflow.json via ConfigMap
-    logger.info("Step 7: Creating workflow.json ConfigMap")
+    # Step 2: Inject workflow.json via ConfigMap
+    logger.info("Step 2: Creating workflow.json ConfigMap")
     if state.workflow_json:
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -147,8 +80,8 @@ async def run_deployment_phase(
             file_key="workflow.json",
         )
 
-    # Step 8: Install hf-run
-    logger.info("Step 8: Installing hf-run")
+    # Step 3: Install hf-run
+    logger.info("Step 3: Installing hf-run")
     run_chart = str(Path(charts_path) / "charts" / "hyperflow-run")
     values = generate_helm_values(
         settings,
@@ -183,8 +116,8 @@ async def run_deployment_phase(
     )
     state.helm_release_name = "hf-run"
 
-    # Step 9: Wait for engine pod
-    logger.info("Step 9: Waiting for engine pod readiness")
+    # Step 4: Wait for engine pod
+    logger.info("Step 4: Waiting for engine pod readiness")
     pod_name = await kubectl.wait_for_pod(
         namespace=namespace,
         label_selector="component=hyperflow-engine",
