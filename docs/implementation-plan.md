@@ -1587,6 +1587,7 @@ Each PR must pass before merge:
 3. `make test` — all unit tests pass
 4. `make test-integration` — integration tests pass (where applicable)
 5. Manual CLI smoke test documented in PR description
+6. `/code-review:code-review` — automated code review after PR creation (fix any high-confidence issues before requesting human review)
 
 ### Stage 1 Acceptance Verification
 

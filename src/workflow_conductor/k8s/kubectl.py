@@ -228,8 +228,8 @@ class Kubectl:
         return stdout.decode().strip()
 
     async def create_namespace(self, namespace: str) -> str:
-        """Create a namespace (idempotent)."""
-        return await self._run(
+        """Create a namespace (idempotent via dry-run + apply)."""
+        dry_run_output = await self._run(
             [
                 "create",
                 "namespace",
@@ -239,6 +239,23 @@ class Kubectl:
                 "yaml",
             ]
         )
+        cmd = ["kubectl", "apply", "-f", "-"]
+        if self.kubeconfig:
+            cmd.extend(["--kubeconfig", self.kubeconfig])
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(input=dry_run_output.encode()),
+            timeout=60,
+        )
+        if proc.returncode != 0:
+            raise KubectlError(f"namespace creation failed: {stderr.decode().strip()}")
+        return stdout.decode().strip()
 
     async def create_resource_quota(
         self,

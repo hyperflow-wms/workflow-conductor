@@ -84,16 +84,27 @@ class TestWaitForPod:
 
 class TestCreateNamespace:
     @pytest.mark.asyncio
-    async def test_create_namespace_args(self, kubectl: Kubectl) -> None:
+    async def test_create_namespace_dry_run_then_apply(self, kubectl: Kubectl) -> None:
+        dry_run_proc = _mock_proc("apiVersion: v1\nkind: Namespace")
+        apply_proc = _mock_proc("namespace/test-ns created")
         with patch(
-            "asyncio.create_subprocess_exec", return_value=_mock_proc("created")
+            "asyncio.create_subprocess_exec",
+            side_effect=[dry_run_proc, apply_proc],
         ) as mock_exec:
-            await kubectl.create_namespace("test-ns")
-            call_args = mock_exec.call_args[0]
-            assert "create" in call_args
-            assert "namespace" in call_args
-            assert "test-ns" in call_args
-            assert "--dry-run=client" in call_args
+            result = await kubectl.create_namespace("test-ns")
+            assert mock_exec.call_count == 2
+            # First call: dry-run to generate YAML
+            dry_run_args = mock_exec.call_args_list[0][0]
+            assert "create" in dry_run_args
+            assert "namespace" in dry_run_args
+            assert "test-ns" in dry_run_args
+            assert "--dry-run=client" in dry_run_args
+            # Second call: apply via stdin
+            apply_args = mock_exec.call_args_list[1][0]
+            assert "apply" in apply_args
+            assert "-f" in apply_args
+            assert "-" in apply_args
+            assert result == "namespace/test-ns created"
 
 
 class TestCreateResourceQuota:
