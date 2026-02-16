@@ -40,11 +40,14 @@ class TestConfigMapInjection:
 
         # Verify with kr8s
         api = await kr8s.asyncio.api()
-        configmaps = await api.get(
-            "configmaps",
-            namespace=test_namespace,
-            label_selector="",
-        )
+        configmaps = [
+            cm
+            async for cm in api.get(
+                "configmaps",
+                namespace=test_namespace,
+                label_selector="",
+            )
+        ]
 
         cm_names = [cm.name for cm in configmaps]
         assert "workflow-json" in cm_names
@@ -94,10 +97,13 @@ class TestConfigMapInjection:
 
         # Verify updated content with kr8s
         api = await kr8s.asyncio.api()
-        configmaps = await api.get(
-            "configmaps",
-            namespace=test_namespace,
-        )
+        configmaps = [
+            cm
+            async for cm in api.get(
+                "configmaps",
+                namespace=test_namespace,
+            )
+        ]
 
         for cm in configmaps:
             if cm.name == "workflow-json":
