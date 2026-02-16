@@ -1252,6 +1252,59 @@ ROUTING -> PLANNING -> VALIDATION (Gate 1) -> PROVISIONING -> GENERATION -> APPR
 
 ---
 
+### Stage 2.5: E2E Test Validation — Prove the Pipeline Runs
+
+**Goal:** Fix all config/fixture/assertion gaps so that `make test-integration` (no LLM tokens) and `make test-e2e` (with LLM tokens) actually pass against real infrastructure.
+
+**Why:** Stages 0–2 built 144 unit tests but the pipeline has never actually run. Integration and E2E test files exist (PR 1.7) but were never executed due to missing infrastructure setup, wrong config defaults, and stale assertions.
+
+**Gaps to Fix:**
+1. No `local/` directory with Kind config in conductor repo
+2. Config defaults wrong (Composer server command = `"python"` should be `"docker"`, empty chart paths)
+3. E2E fixtures missing `hyperflow_k8s_deployment_path` and Docker/LLM guards
+4. E2E assertions stale (`phase_results >= 4` should be `>= 7` or `== 9`)
+5. Integration fixture namespace collision (same-second runs)
+6. Makefile missing `docker-pull-images` target and path guards
+
+**PR Breakdown:**
+
+**PR 2.7: Config Defaults, Test Fixtures & Local Kind Config** (`fix/e2e-readiness`)
+- Create `local/kind-config-3n.yaml` (copy from hyperflow-k8s-deployment)
+- Fix `config.py`: Composer server defaults to Docker command
+- Fix `tests/e2e/conftest.py`: set `hyperflow_k8s_deployment_path`, add Docker/LLM skip guards
+- Fix `tests/e2e/test_full_pipeline.py`: update phase count assertions
+- Fix `tests/integration/conftest.py`: namespace collision (uuid suffix)
+- Update `.env.example` with missing variables
+- Add `docker-pull-images` Makefile target, path guard on `infra-up`
+- Update `tests/unit/test_config.py` for new defaults
+- Requires: nothing external (validated with `make ci` only)
+
+**PR 2.8: Integration Test Validation on Kind** (`fix/integration-test-validation`)
+- Run `make test-integration` on real Kind cluster, fix whatever breaks
+- Anticipated: pytest-asyncio session scope, kr8s discovery, timeout tuning
+- Requires: Docker + Kind, no LLM tokens
+
+**PR 2.9: E2E Test Validation with Full Pipeline** (`fix/e2e-test-validation`)
+- Run `make test-e2e` with real LLM + MCP + K8s, fix whatever breaks
+- Anticipated: MCP Docker stdio, LLM parsing edge cases, timeout tuning, cleanup fixtures
+- Requires: Docker + Kind + loaded images + LLM API key
+
+**Dependency Graph:**
+```
+PR 2.7 (Config + fixtures) ──→ PR 2.8 (Integration on Kind) ──→ PR 2.9 (E2E full pipeline)
+     make ci only                  Docker + Kind                    Docker + Kind + LLM
+```
+
+**Acceptance Criteria:**
+1. `make ci` passes (144+ unit tests, lint, typecheck)
+2. `make test-integration` passes on Kind (5+ tests, no LLM tokens)
+3. `make test-e2e` passes (dry-run + full pipeline, with LLM tokens)
+4. `make setup && make test-all` works from a clean slate
+
+**Estimated Size:** ~240 lines across 3 PRs
+
+---
+
 ### Stage 3: Resource Profiling
 
 **Goal:** Integrate the existing Workflow Profiler for evidence-based K8s resource recommendations.
