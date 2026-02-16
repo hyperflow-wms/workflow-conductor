@@ -111,6 +111,7 @@ HF_CONDUCTOR_LLM__DEFAULT_PROVIDER=google
 ## Workflow Conventions
 
 - **After finishing work**: Always commit, create a PR with `@balis` as reviewer
+- **After creating a PR**: Run `/code-review:code-review` to self-review the PR before requesting human review
 - **After merging a PR**: Always create an annotated git tag (e.g., `v0.1.0-models`) so we can return to that project state later
 
 ## Implementation Plan
