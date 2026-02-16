@@ -2,6 +2,7 @@
 
 from workflow_conductor.phases.completion import run_completion_phase
 from workflow_conductor.phases.deployment import run_deployment_phase
+from workflow_conductor.phases.generation import run_generation_phase
 from workflow_conductor.phases.monitoring import run_monitoring_phase
 from workflow_conductor.phases.planning import run_planning_phase
 from workflow_conductor.phases.provisioning import run_provisioning_phase
@@ -11,6 +12,7 @@ from workflow_conductor.phases.validation import run_validation_phase
 __all__ = [
     "run_completion_phase",
     "run_deployment_phase",
+    "run_generation_phase",
     "run_monitoring_phase",
     "run_planning_phase",
     "run_provisioning_phase",
