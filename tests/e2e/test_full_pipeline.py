@@ -34,10 +34,13 @@ class TestFullPipeline:
         assert state.intent_classification == "1000genome"
         assert state.workflow_plan is not None
         assert state.user_approved_plan is True
+        # Dry-run covers 3 phases: routing, planning, validation
+        assert len(state.phase_results) == 3
         # No deployment in dry-run
         assert state.namespace == ""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(900)
     async def test_full_pipeline_execution(
         self, e2e_settings: ConductorSettings
     ) -> None:
@@ -60,4 +63,5 @@ class TestFullPipeline:
         )
         assert state.namespace != ""
         assert state.execution_summary is not None
-        assert len(state.phase_results) >= 4
+        # Full pipeline: 9 phases. Allow >= 7 for partial runs that fail late.
+        assert len(state.phase_results) >= 7

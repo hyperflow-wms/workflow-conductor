@@ -23,9 +23,17 @@ class HelmSettings(BaseSettings):
 
 
 class WorkflowSettings(BaseSettings):
-    composer_server_command: str = "python"
+    composer_server_command: str = "docker"
     composer_server_args: list[str] = Field(
-        default_factory=lambda: ["-m", "workflow_composer.mcp_server"]
+        default_factory=lambda: [
+            "run",
+            "--rm",
+            "-i",
+            "hyperflowwms/1000genome-mcp:2.0",
+            "python",
+            "-m",
+            "workflow_composer.mcp_server",
+        ]
     )
     default_parallelism: str = "moderate"
 
