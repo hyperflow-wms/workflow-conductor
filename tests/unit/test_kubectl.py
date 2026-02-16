@@ -124,6 +124,37 @@ class TestCreateResourceQuota:
             assert "--hard=requests.cpu=21,requests.memory=60Gi" in call_args
 
 
+class TestGetNodes:
+    @pytest.mark.asyncio
+    async def test_returns_node_info(self, kubectl: Kubectl) -> None:
+        node_json = json.dumps(
+            {
+                "items": [
+                    {
+                        "status": {
+                            "capacity": {"cpu": "4", "memory": "8Gi"},
+                            "nodeInfo": {"kubeletVersion": "v1.31.0"},
+                        }
+                    },
+                    {
+                        "status": {
+                            "capacity": {"cpu": "4", "memory": "8Gi"},
+                            "nodeInfo": {"kubeletVersion": "v1.31.0"},
+                        }
+                    },
+                ]
+            }
+        )
+        with patch(
+            "asyncio.create_subprocess_exec", return_value=_mock_proc(node_json)
+        ):
+            result = await kubectl.get_nodes()
+        assert result["node_count"] == 2
+        assert result["total_cpu"] == 8
+        assert result["total_memory_gb"] == 16.0
+        assert result["k8s_version"] == "v1.31.0"
+
+
 class TestDeleteNamespace:
     @pytest.mark.asyncio
     async def test_delete_with_no_wait(self, kubectl: Kubectl) -> None:

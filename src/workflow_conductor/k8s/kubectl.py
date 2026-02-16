@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from typing import Any
@@ -277,6 +278,37 @@ class Kubectl:
             ],
             check=False,
         )
+
+    async def get_nodes(self) -> dict[str, Any]:
+        """Query cluster nodes and return aggregate capacity info."""
+        data = await self.get_json("nodes")
+        items = data.get("items", [])
+        total_cpu = 0
+        total_memory_gb = 0.0
+        k8s_version = ""
+        for node in items:
+            status = node.get("status", {})
+            capacity = status.get("capacity", {})
+            total_cpu += int(capacity.get("cpu", "0"))
+            mem_str = capacity.get("memory", "0")
+            if mem_str.endswith("Gi"):
+                total_memory_gb += float(mem_str[:-2])
+            elif mem_str.endswith("Ki"):
+                total_memory_gb += float(mem_str[:-2]) / (1024 * 1024)
+            elif mem_str.endswith("Mi"):
+                total_memory_gb += float(mem_str[:-2]) / 1024
+            else:
+                with contextlib.suppress(ValueError):
+                    total_memory_gb += float(mem_str) / (1024**3)
+            node_info = status.get("nodeInfo", {})
+            if not k8s_version:
+                k8s_version = node_info.get("kubeletVersion", "")
+        return {
+            "node_count": len(items),
+            "total_cpu": total_cpu,
+            "total_memory_gb": total_memory_gb,
+            "k8s_version": k8s_version,
+        }
 
     async def delete_namespace(
         self,
