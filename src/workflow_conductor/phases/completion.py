@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from rich.console import Console
+
 from workflow_conductor.k8s import Helm, Kubectl
 from workflow_conductor.models import (
     ExecutionSummary,
@@ -16,6 +18,8 @@ from workflow_conductor.ui.display import (
     display_completion_summary,
     display_phase_header,
 )
+
+_console = Console()
 
 if TYPE_CHECKING:
     from workflow_conductor.config import ConductorSettings
@@ -43,8 +47,13 @@ async def run_completion_phase(
         total_runtime_seconds=total_runtime,
     )
 
-    # Teardown if configured
-    if settings.auto_teardown and namespace:
+    # Teardown if configured (skip in demo mode)
+    if settings.demo and namespace:
+        _console.print(
+            "\n[bold magenta]Demo mode:[/bold magenta] Skipping teardown. "
+            f"Inspect with: [bold]kubectl get pods -n {namespace}[/bold]"
+        )
+    elif settings.auto_teardown and namespace:
         logger.info("Tearing down namespace: %s", namespace)
         try:
             for release in ["hf-run", "hf-data", "hf-ops"]:

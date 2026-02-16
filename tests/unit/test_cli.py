@@ -45,6 +45,12 @@ class TestRunCommand:
         result = runner.invoke(main, ["run", "--auto-approve"])
         assert result.exit_code == 0
 
+    def test_demo_flag(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(main, ["run", "--demo"])
+        assert result.exit_code == 0
+        assert "DEMO MODE" in result.output
+
     def test_log_level_option(self) -> None:
         runner = CliRunner()
         result = runner.invoke(main, ["--log-level", "DEBUG", "run"])
