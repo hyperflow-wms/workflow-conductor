@@ -94,6 +94,46 @@ def display_completion_summary(state: PipelineState) -> None:
     console.print(Panel(table, border_style="blue"))
 
 
+def display_execution_preview(state: PipelineState) -> None:
+    """Display execution preview with real task counts and resource info."""
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_column("Key", style="bold")
+    table.add_column("Value")
+
+    if state.workflow_json:
+        processes = state.workflow_json.get("processes", [])
+        table.add_row("Total Tasks", str(len(processes)))
+
+        # Count by task type prefix
+        type_counts: dict[str, int] = {}
+        for proc in processes:
+            name = proc.get("name", "")
+            # Extract type from name like "individuals_chr22_1" → "individuals"
+            task_type = name.split("_")[0] if "_" in name else name
+            type_counts[task_type] = type_counts.get(task_type, 0) + 1
+        for task_type, count in sorted(type_counts.items()):
+            table.add_row(f"  {task_type}", str(count))
+
+        signals = state.workflow_json.get("signals", [])
+        table.add_row("Signals", str(len(signals)))
+
+    if state.infrastructure:
+        table.add_row("Nodes", str(state.infrastructure.node_count))
+        table.add_row("vCPUs", str(state.infrastructure.available_vcpus))
+        table.add_row("Memory", f"{state.infrastructure.memory_gb:.1f} GB")
+
+    if state.namespace:
+        table.add_row("Namespace", state.namespace)
+
+    console.print(
+        Panel(
+            table,
+            title="[bold yellow]Execution Preview[/bold yellow]",
+            border_style="yellow",
+        )
+    )
+
+
 def display_error(message: str, *, phase: str = "") -> None:
     """Display an error message."""
     prefix = f"\\[{phase}] " if phase else ""

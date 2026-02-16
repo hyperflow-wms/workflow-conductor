@@ -1,5 +1,6 @@
 """Pipeline phases for the Workflow Conductor."""
 
+from workflow_conductor.phases.approval import run_approval_phase
 from workflow_conductor.phases.completion import run_completion_phase
 from workflow_conductor.phases.deployment import run_deployment_phase
 from workflow_conductor.phases.generation import run_generation_phase
@@ -10,6 +11,7 @@ from workflow_conductor.phases.routing import run_routing_phase
 from workflow_conductor.phases.validation import run_validation_phase
 
 __all__ = [
+    "run_approval_phase",
     "run_completion_phase",
     "run_deployment_phase",
     "run_generation_phase",
