@@ -120,6 +120,7 @@ class TestRunPipeline:
             kubectl = MockKubectl.return_value
             kubectl.create_namespace = AsyncMock()
             kubectl.create_resource_quota = AsyncMock()
+            kubectl.cleanup_previous_runs = AsyncMock()
             kubectl.wait_for_job = AsyncMock()
             kubectl.get_nodes = AsyncMock(
                 return_value={

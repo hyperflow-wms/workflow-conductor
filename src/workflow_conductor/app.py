@@ -246,7 +246,10 @@ async def run_pipeline(
             settings,
         )
         if demo:
-            demo_pause()
+            demo_pause(
+                f"Inspect cluster: kubectl get pods -n {state.namespace} "
+                "| Press Enter to tear down and finish..."
+            )
 
         # Phase 9: Completion
         if demo:

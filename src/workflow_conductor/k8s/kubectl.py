@@ -335,3 +335,35 @@ class Kubectl:
         if container:
             args.extend(["-c", container])
         return await self._run(args, check=False)
+
+    async def cleanup_previous_runs(
+        self,
+        namespace_prefix: str,
+        *,
+        current_namespace: str = "",
+    ) -> None:
+        """Clean up namespaces and cluster-scoped resources from previous runs.
+
+        Deletes all namespaces matching the prefix (except current_namespace),
+        and removes orphaned cluster-scoped resources left by hf-ops.
+        """
+        # Find and delete old namespaces
+        output = await self._run(
+            ["get", "namespaces", "-o", "jsonpath={.items[*].metadata.name}"],
+            check=False,
+        )
+        for ns in output.split():
+            if ns.startswith(namespace_prefix) and ns != current_namespace:
+                logger.info("Cleaning up old namespace: %s", ns)
+                await self.delete_namespace(ns)
+
+        # Delete orphaned cluster-scoped resources from hf-ops
+        for resource in [
+            "clusterrole/hf-ops-nfs-server-provisioner",
+            "clusterrolebinding/hf-ops-nfs-server-provisioner",
+            "storageclass/nfs",
+        ]:
+            await self._run(
+                ["delete", resource, "--ignore-not-found"],
+                check=False,
+            )

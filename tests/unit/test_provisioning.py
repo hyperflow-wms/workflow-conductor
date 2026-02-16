@@ -36,6 +36,7 @@ def _mock_kubectl() -> MagicMock:
     kubectl = MagicMock()
     kubectl.create_namespace = AsyncMock(return_value="namespace/wf-test created")
     kubectl.create_resource_quota = AsyncMock(return_value="")
+    kubectl.cleanup_previous_runs = AsyncMock()
     kubectl.get_nodes = AsyncMock(
         return_value={
             "node_count": 2,

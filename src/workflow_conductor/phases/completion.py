@@ -47,19 +47,25 @@ async def run_completion_phase(
         total_runtime_seconds=total_runtime,
     )
 
-    # Teardown if configured (skip in demo mode)
-    if settings.demo and namespace:
-        _console.print(
-            "\n[bold magenta]Demo mode:[/bold magenta] Skipping teardown. "
-            f"Inspect with: [bold]kubectl get pods -n {namespace}[/bold]"
-        )
-    elif settings.auto_teardown and namespace:
+    # Teardown: always in demo mode, otherwise only if auto_teardown is set
+    should_teardown = settings.demo or settings.auto_teardown
+    if should_teardown and namespace:
+        if settings.demo:
+            _console.print(
+                "\n[bold magenta]Demo mode:[/bold magenta] "
+                "Tearing down for clean re-run."
+            )
         logger.info("Tearing down namespace: %s", namespace)
         try:
             for release in ["hf-run", "hf-data", "hf-ops"]:
                 if await helm.release_exists(release, namespace=namespace):
                     await helm.uninstall(release, namespace=namespace)
             await kubectl.delete_namespace(namespace)
+            # Clean up cluster-scoped resources left by hf-ops
+            await kubectl.cleanup_previous_runs(
+                settings.kubernetes.namespace_prefix,
+                current_namespace="",
+            )
             state.teardown_completed = True
         except Exception:
             logger.warning("Teardown encountered errors", exc_info=True)

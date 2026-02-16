@@ -193,9 +193,9 @@ _PHASE_EXPLANATIONS: dict[PipelinePhase, str] = {
         "and failed jobs until all tasks finish or a timeout is reached."
     ),
     PipelinePhase.COMPLETION: (
-        "Builds the execution summary, optionally tears down the "
-        "namespace. In demo mode teardown is skipped so you can inspect "
-        "the cluster."
+        "Builds the execution summary and tears down the namespace. "
+        "In demo mode, the previous pause is your window to inspect "
+        "the cluster before cleanup."
     ),
 }
 

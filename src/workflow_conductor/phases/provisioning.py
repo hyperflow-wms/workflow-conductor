@@ -66,6 +66,10 @@ async def run_provisioning_phase(
     kubectl = Kubectl(kubeconfig=settings.kubernetes.kubeconfig)
     helm = Helm(kubeconfig=settings.kubernetes.kubeconfig)
 
+    # Step 0.5: Clean up previous runs (old namespaces + cluster-scoped resources)
+    logger.info("Cleaning up resources from previous runs")
+    await kubectl.cleanup_previous_runs(settings.kubernetes.namespace_prefix)
+
     # Step 1: Create namespace
     ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     namespace = f"{settings.kubernetes.namespace_prefix}-{ts}"
