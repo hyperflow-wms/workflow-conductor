@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from workflow_conductor.models import (
+    ChromosomeData,
     ExecutionSummary,
     InfrastructureMeasurements,
     IntentClassification,
@@ -14,6 +15,7 @@ from workflow_conductor.models import (
     PipelineState,
     PipelineStatus,
     ResourceProfile,
+    RetryPolicy,
     UserResponse,
     WorkflowPlan,
 )
@@ -22,8 +24,11 @@ from workflow_conductor.models import (
 class TestEnums:
     def test_pipeline_phases(self) -> None:
         assert PipelinePhase.ROUTING.value == "routing"
+        assert PipelinePhase.PROVISIONING.value == "provisioning"
+        assert PipelinePhase.GENERATION.value == "generation"
+        assert PipelinePhase.APPROVAL.value == "approval"
         assert PipelinePhase.COMPLETION.value == "completion"
-        assert len(PipelinePhase) == 6
+        assert len(PipelinePhase) == 9
 
     def test_pipeline_status(self) -> None:
         assert PipelineStatus.PENDING.value == "pending"
@@ -230,3 +235,62 @@ class TestPipelineState:
         dumped = state.model_dump()
         assert isinstance(dumped, dict)
         assert dumped["execution_id"] == "test-123"
+
+    def test_chromosome_data_default_empty(self) -> None:
+        state = PipelineState()
+        assert state.chromosome_data == []
+
+    def test_chromosome_data_no_shared_mutable(self) -> None:
+        state_a = PipelineState()
+        state_b = PipelineState()
+        state_a.chromosome_data.append(
+            ChromosomeData(
+                vcf_file="ALL.chr22.vcf",
+                row_count=1000,
+                annotation_file="ALL.chr22.annotation.vcf",
+                chromosome="22",
+            )
+        )
+        assert state_b.chromosome_data == []
+
+
+class TestChromosomeData:
+    def test_required_fields(self) -> None:
+        cd = ChromosomeData(
+            vcf_file="ALL.chr22.vcf",
+            row_count=494328,
+            annotation_file="ALL.chr22.annotation.vcf",
+            chromosome="22",
+        )
+        assert cd.vcf_file == "ALL.chr22.vcf"
+        assert cd.row_count == 494328
+        assert cd.chromosome == "22"
+
+    def test_json_roundtrip(self) -> None:
+        cd = ChromosomeData(
+            vcf_file="ALL.chr6.hla.vcf",
+            row_count=12345,
+            annotation_file="ALL.chr6.hla.annotation.vcf",
+            chromosome="6",
+        )
+        data = json.loads(cd.model_dump_json())
+        restored = ChromosomeData.model_validate(data)
+        assert restored.vcf_file == "ALL.chr6.hla.vcf"
+        assert restored.row_count == 12345
+
+
+class TestRetryPolicy:
+    def test_defaults(self) -> None:
+        policy = RetryPolicy()
+        assert policy.max_retries == 3
+        assert policy.backoff_base == 2.0
+        assert policy.retryable_errors == []
+
+    def test_custom_values(self) -> None:
+        policy = RetryPolicy(
+            max_retries=5,
+            backoff_base=1.5,
+            retryable_errors=["KubectlError", "HelmError"],
+        )
+        assert policy.max_retries == 5
+        assert len(policy.retryable_errors) == 2
