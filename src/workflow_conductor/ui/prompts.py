@@ -37,3 +37,27 @@ def prompt_validation_gate(*, auto_approve: bool = False) -> UserResponse:
         feedback = Prompt.ask("Describe your modifications")
 
     return UserResponse(action=action, feedback=feedback)
+
+
+def prompt_execution_gate(*, auto_approve: bool = False) -> UserResponse:
+    """Prompt user to approve or abort execution (Gate 2).
+
+    Unlike Gate 1, there is no 'refine' option — refinement happens at Gate 1.
+    """
+    if auto_approve:
+        console.print("[dim]Auto-approve enabled, skipping execution gate.[/dim]")
+        return UserResponse(action="approve")
+
+    console.print()
+    console.print("[bold]Proceed with execution?[/bold]")
+    console.print("  [green]approve[/green]  - Deploy and run the workflow")
+    console.print("  [red]abort[/red]    - Cancel the pipeline")
+    console.print()
+
+    action = Prompt.ask(
+        "Choose action",
+        choices=["approve", "abort"],
+        default="approve",
+    )
+
+    return UserResponse(action=action)
