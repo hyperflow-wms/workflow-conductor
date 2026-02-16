@@ -19,6 +19,10 @@ def generate_helm_values(
 
     Includes image overrides, workflow ConfigMap mount, and optional
     resource profiles from the Workflow Profiler.
+
+    The volumes/volumeMounts lists must be COMPLETE because Helm replaces
+    (not merges) list values.  We include the chart defaults alongside
+    our workflow-json ConfigMap addition.
     """
     values: dict[str, Any] = {
         "hyperflow-engine": {
@@ -26,27 +30,62 @@ def generate_helm_values(
                 "hyperflow": {
                     "image": settings.hf_engine_image,
                     "autoRun": True,
+                    "volumeMounts": [
+                        # Chart defaults
+                        {"name": "workflow-data", "mountPath": "/work_dir"},
+                        {
+                            "name": "config-map",
+                            "mountPath": "/opt/hyperflow/job-template.yaml",
+                            "subPath": "job-template.yaml",
+                            "readOnly": True,
+                        },
+                        {
+                            "name": "worker-config",
+                            "mountPath": (
+                                "/work_dir/workflow.config.executionModels.json"
+                            ),
+                            "subPath": "workflow.config.executionModels.json",
+                            "readOnly": True,
+                        },
+                        # Conductor addition: workflow.json from ConfigMap
+                        {
+                            "name": "workflow-json",
+                            "mountPath": "/work_dir/workflow.json",
+                            "subPath": "workflow.json",
+                            "readOnly": True,
+                        },
+                    ],
                 },
                 "worker": {
                     "image": settings.worker_image,
                 },
             },
-            "volumeMounts": [
-                {
-                    "name": "workflow-json",
-                    "mountPath": "/work_dir/workflow.json",
-                    "subPath": "workflow.json",
-                    "readOnly": True,
-                },
-            ],
+            # Complete volumes list (chart defaults + our addition)
             "volumes": [
                 {
+                    "name": "config-map",
+                    "configMap": {"name": "hyperflow-config"},
+                },
+                {
+                    "name": "workflow-data",
+                    "persistentVolumeClaim": {"claimName": "nfs"},
+                },
+                {
+                    "name": "worker-config",
+                    "configMap": {"name": "worker-config"},
+                },
+                {
                     "name": "workflow-json",
-                    "configMap": {
-                        "name": "workflow-json",
-                    },
+                    "configMap": {"name": "workflow-json"},
                 },
             ],
+        },
+        "nfs-volume": {
+            "pv": {
+                "capacity": {
+                    "storage": "10Gi",
+                },
+            },
         },
         "hyperflow-nfs-data": {
             "workflow": {

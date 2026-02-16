@@ -29,21 +29,19 @@ async def run_provisioning_phase(
     state: PipelineState,
     settings: ConductorSettings,
 ) -> PipelineState:
-    """Set up K8s infrastructure, stage data, and measure the environment.
+    """Set up K8s infrastructure and measure the environment.
 
-    Steps (extracted from the original 10-step deployment):
-    0. Ensure Kind cluster exists
+    Steps:
+    0. Ensure Kind cluster exists (export kubeconfig)
     1. Create namespace with timestamp suffix
-    2. Install hf-ops (NFS, Redis)
+    2. Install hf-ops (NFS provisioner, RabbitMQ, KEDA)
     3. Create ResourceQuota
-    4. Stage data via hf-data chart
-    5. Wait for data staging job
-    6. Query cluster for infrastructure measurements
+    4. Query cluster for infrastructure measurements
+
+    Note: Data staging (nfs-data) is handled by the hf-run chart as a
+    sub-chart dependency, not as a separate install. See deployment phase.
     """
     display_phase_header(PipelinePhase.PROVISIONING)
-
-    kubectl = Kubectl(kubeconfig=settings.kubernetes.kubeconfig)
-    helm = Helm(kubeconfig=settings.kubernetes.kubeconfig)
 
     # Step 0: Ensure Kind cluster
     if settings.kubernetes.cluster_provider == "kind":
@@ -60,7 +58,13 @@ async def run_provisioning_phase(
                 settings.data_image,
             ]:
                 await cluster.load_image(image)
-        await cluster.use_context()
+
+        # Always export Kind kubeconfig for Kind clusters — the system's
+        # $KUBECONFIG env var may be too long or point to wrong clusters
+        settings.kubernetes.kubeconfig = await cluster.export_kubeconfig()
+
+    kubectl = Kubectl(kubeconfig=settings.kubernetes.kubeconfig)
+    helm = Helm(kubeconfig=settings.kubernetes.kubeconfig)
 
     # Step 1: Create namespace
     ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
@@ -94,28 +98,8 @@ async def run_provisioning_phase(
         hard_memory=settings.resource_quota_memory,
     )
 
-    # Step 4: Stage data
-    logger.info("Step 4: Staging data via hf-data")
-    data_chart = str(Path(charts_path) / "charts" / "hyperflow-nfs-data")
-    await helm.upgrade_install(
-        "hf-data",
-        data_chart,
-        namespace=namespace,
-        set_values={
-            "workflow.image": settings.data_image,
-        },
-    )
-
-    # Step 5: Wait for data staging
-    logger.info("Step 5: Waiting for data staging job")
-    await kubectl.wait_for_job(
-        "hf-data",
-        namespace=namespace,
-        timeout=300,
-    )
-
-    # Step 6: Query infrastructure measurements
-    logger.info("Step 6: Querying infrastructure measurements")
+    # Step 4: Query infrastructure measurements
+    logger.info("Step 4: Querying infrastructure measurements")
     node_info = await kubectl.get_nodes()
     state.infrastructure = InfrastructureMeasurements(
         namespace=namespace,

@@ -27,12 +27,20 @@ logger = logging.getLogger(__name__)
 GENERATION_INSTRUCTION = """You are a genomics workflow generation assistant.
 You have access to the 1000 Genomes Workflow Composer MCP server.
 
-Your task is to generate a complete HyperFlow workflow.json file using the
-generate_workflow tool. You will be given chromosome data with exact row counts
-and population information.
+Your task is to generate a complete HyperFlow workflow.json file. Follow these
+steps IN ORDER:
 
-Call the generate_workflow tool with the provided chromosome_data and populations.
-Return ONLY the workflow JSON — no explanations or markdown formatting."""
+1. Call estimate_variants for each chromosome listed below to get row counts.
+   If no chromosome data is provided, use the chromosomes and populations
+   from the research context.
+2. Call generate_workflow with:
+   - chromosome_data: array of {vcf_file, row_count, annotation_file} for
+     each chromosome (use "ALL.chr{N}.phase3.vcf.gz" as vcf_file and
+     "ALL.chr{N}.phase3.annotation.vcf.gz" as annotation_file)
+   - populations: the population codes from the research plan
+   - parallelism: "small" (unless specified otherwise)
+
+You MUST call generate_workflow — do NOT return the workflow JSON yourself."""
 
 LLM_FACTORIES: dict[str, type] = {
     "anthropic": AnthropicAugmentedLLM,
@@ -127,6 +135,16 @@ async def run_generation_phase(
     """
     display_phase_header(PipelinePhase.GENERATION)
 
+    # If the planning phase already produced workflow JSON (Gemini sometimes
+    # calls generate_workflow in one shot), skip the redundant LLM call.
+    if state.workflow_json is not None:
+        logger.info(
+            "Workflow JSON already present from planning phase (%d processes), "
+            "skipping generation",
+            len(state.workflow_json.get("processes", [])),
+        )
+        return state
+
     provider = settings.llm.default_provider
     llm_class = LLM_FACTORIES.get(provider)
     if llm_class is None:
@@ -146,12 +164,53 @@ async def run_generation_phase(
         prompt = _build_generation_prompt(state)
         response = await llm.generate_str(
             message=prompt,
-            request_params=RequestParams(max_iterations=5),
+            request_params=RequestParams(max_iterations=10),
         )
 
     logger.debug("Generation response: %s", response)
 
     workflow_json = _extract_workflow_json(response)
+
+    # Fallback: scan LLM history for tool results containing workflow JSON.
+    # Google Gemini returns function_call parts (not text) so generate_str()
+    # yields an empty string.  The actual workflow JSON lives inside
+    # function_response parts stored in llm.history.
+    if workflow_json is None and hasattr(llm, "history"):
+        try:
+            history = llm.history.get()
+        except Exception:
+            history = []
+
+        for msg in reversed(history):
+            if workflow_json is not None:
+                break
+            # Google: types.Content with .role and .parts
+            if hasattr(msg, "parts") and msg.parts:
+                for part in msg.parts:
+                    # Tool result stored as function_response
+                    fr = getattr(part, "function_response", None)
+                    if fr and hasattr(fr, "response") and isinstance(fr.response, dict):
+                        for val in fr.response.get("result", []):
+                            text = getattr(val, "text", None)
+                            if text:
+                                workflow_json = _extract_workflow_json(text)
+                                if workflow_json is not None:
+                                    logger.info(
+                                        "Extracted workflow JSON from tool result "
+                                        "in conversation history"
+                                    )
+                                    break
+                    # Also check plain text parts (model summary)
+                    if workflow_json is None:
+                        text = getattr(part, "text", None)
+                        if text:
+                            workflow_json = _extract_workflow_json(text)
+            # Anthropic: dict-based messages
+            elif isinstance(msg, dict):
+                content = str(msg.get("content", ""))
+                if content:
+                    workflow_json = _extract_workflow_json(content)
+
     if workflow_json is not None:
         state.workflow_json = workflow_json
         logger.info(

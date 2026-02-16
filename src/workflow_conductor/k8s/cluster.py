@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import tempfile
 
 logger = logging.getLogger(__name__)
 
@@ -84,3 +86,17 @@ class KindCluster:
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
         return stdout.decode().strip()
+
+    async def export_kubeconfig(self) -> str:
+        """Export the Kind cluster's kubeconfig to a temp file.
+
+        Returns the path to the temp file. Useful when the KUBECONFIG
+        env var contains many merged configs that cause 'file name too long'
+        errors.
+        """
+        output = await self._run(["get", "kubeconfig", "--name", self.name])
+        fd, path = tempfile.mkstemp(prefix=f"kind-{self.name}-", suffix=".kubeconfig")
+        with os.fdopen(fd, "w") as f:
+            f.write(output)
+        logger.info("Exported Kind kubeconfig to %s", path)
+        return path
