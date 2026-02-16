@@ -40,6 +40,16 @@ class TestConductorSettingsDefaults:
         assert settings.monitor_poll_interval == 10
         assert settings.monitor_timeout == 3600
 
+    def test_default_composer_server_command(self) -> None:
+        settings = ConductorSettings()
+        assert settings.workflow.composer_server_command == "docker"
+
+    def test_default_composer_server_args_contain_image(self) -> None:
+        settings = ConductorSettings()
+        assert (
+            "hyperflowwms/1000genome-mcp:2.0" in settings.workflow.composer_server_args
+        )
+
 
 class TestConductorSettingsEnvOverride:
     def test_env_auto_approve(self) -> None:

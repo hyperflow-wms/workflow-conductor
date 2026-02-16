@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
@@ -24,7 +25,9 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 @pytest.fixture(scope="session")
 def settings() -> ConductorSettings:
-    return ConductorSettings()
+    return ConductorSettings(
+        kubernetes={"kind_config": "local/kind-config-3n.yaml"},  # type: ignore[arg-type]
+    )
 
 
 @pytest.fixture(scope="session")
@@ -77,7 +80,8 @@ async def test_namespace(
     """Create an isolated namespace for each test, clean up after."""
     kubectl = Kubectl()
     ts = datetime.now(UTC).strftime("%H%M%S")
-    ns = f"test-{ts}"
+    suffix = uuid.uuid4().hex[:4]
+    ns = f"test-{ts}-{suffix}"
 
     await kubectl.create_namespace(ns)
     yield ns

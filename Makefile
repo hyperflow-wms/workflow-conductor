@@ -124,9 +124,18 @@ cluster-load-images: cluster-ready ## Load Docker images into Kind cluster
 	kind load docker-image hyperflowwms/1000genome-worker:1.0-je1.3.4 --name $(CLUSTER_NAME)
 	kind load docker-image hyperflowwms/1000genome-data:1.0 --name $(CLUSTER_NAME)
 
+.PHONY: docker-pull-images
+docker-pull-images: ## Pull all required Docker images
+	docker pull hyperflowwms/hyperflow:latest
+	docker pull hyperflowwms/1000genome-worker:1.0-je1.3.4
+	docker pull hyperflowwms/1000genome-data:1.0
+	docker pull hyperflowwms/1000genome-mcp:2.0
+
 # --- Infrastructure ---
 .PHONY: infra-up
 infra-up: cluster-create ## Deploy hf-ops infrastructure
+	@test -d "$(K8S_DEPLOYMENT_PATH)" || \
+		(echo "ERROR: K8S_DEPLOYMENT_PATH='$(K8S_DEPLOYMENT_PATH)' not found. Set it to the hyperflow-k8s-deployment repo." && exit 1)
 	helm upgrade --install hf-ops $(K8S_DEPLOYMENT_PATH)/charts/hyperflow-ops \
 		--dependency-update --wait --timeout 15m \
 		-f $(K8S_DEPLOYMENT_PATH)/local/values-fast-test-ops.yaml
@@ -146,7 +155,7 @@ infra-status: ## Check infrastructure component status
 
 # --- Full Setup / Teardown ---
 .PHONY: setup
-setup: install cluster-create cluster-load-images infra-up ## Full setup from scratch
+setup: install docker-pull-images cluster-create cluster-load-images infra-up ## Full setup from scratch
 	@echo "Setup complete. Run 'make run' to start the conductor."
 
 .PHONY: teardown
