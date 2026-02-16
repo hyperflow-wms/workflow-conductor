@@ -8,46 +8,48 @@ from unittest.mock import patch
 from workflow_conductor.config import ConductorSettings
 
 
+def _defaults() -> ConductorSettings:
+    """Construct settings without loading .env file (test pure code defaults)."""
+    return ConductorSettings(_env_file=None)  # type: ignore[call-arg]
+
+
 class TestConductorSettingsDefaults:
     def test_default_cluster_name(self) -> None:
-        settings = ConductorSettings()
-        assert settings.kubernetes.cluster_name == "hyperflow-test"
+        assert _defaults().kubernetes.cluster_name == "hyperflow-test"
 
     def test_default_provider(self) -> None:
-        settings = ConductorSettings()
-        assert settings.llm.default_provider == "anthropic"
+        assert _defaults().llm.default_provider == "anthropic"
 
     def test_default_behavior_flags(self) -> None:
-        settings = ConductorSettings()
+        settings = _defaults()
         assert settings.auto_approve is False
         assert settings.auto_teardown is False
         assert settings.skip_profiler is True
         assert settings.verbose is False
 
     def test_default_images(self) -> None:
-        settings = ConductorSettings()
+        settings = _defaults()
         assert "hyperflowwms/hyperflow" in settings.hf_engine_image
         assert "1000genome-worker" in settings.worker_image
         assert "1000genome-data" in settings.data_image
 
     def test_default_helm_timeouts(self) -> None:
-        settings = ConductorSettings()
+        settings = _defaults()
         assert settings.helm.timeout_ops == "15m"
         assert settings.helm.timeout_run == "10m"
 
     def test_default_monitor_settings(self) -> None:
-        settings = ConductorSettings()
+        settings = _defaults()
         assert settings.monitor_poll_interval == 10
         assert settings.monitor_timeout == 3600
 
     def test_default_composer_server_command(self) -> None:
-        settings = ConductorSettings()
-        assert settings.workflow.composer_server_command == "docker"
+        assert _defaults().workflow.composer_server_command == "docker"
 
     def test_default_composer_server_args_contain_image(self) -> None:
-        settings = ConductorSettings()
         assert (
-            "hyperflowwms/1000genome-mcp:2.0" in settings.workflow.composer_server_args
+            "hyperflowwms/1000genome-mcp:2.0"
+            in _defaults().workflow.composer_server_args
         )
 
 
