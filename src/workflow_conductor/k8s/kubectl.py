@@ -357,10 +357,11 @@ class Kubectl:
                 logger.info("Cleaning up old namespace: %s", ns)
                 await self.delete_namespace(ns)
 
-        # Delete orphaned cluster-scoped resources from hf-ops
+        # Delete orphaned cluster-scoped resources from hf-ops and hf-run
         for resource in [
             "clusterrole/hf-ops-nfs-server-provisioner",
             "clusterrolebinding/hf-ops-nfs-server-provisioner",
+            "clusterrolebinding/serviceaccounts-cluster-admin-hf-run",
             "storageclass/nfs",
         ]:
             await self._run(
