@@ -59,11 +59,23 @@ class TestFullPipeline:
             auto_approve=True,
         )
 
-        assert state.status in (
-            PipelineStatus.COMPLETED,
-            PipelineStatus.FAILED,
-        )
+        # All 9 phases must complete successfully
+        assert state.status == PipelineStatus.COMPLETED
+        assert len(state.phase_results) == 9
+
+        # Workflow plan should reflect the prompt
+        assert state.workflow_plan is not None
+        assert "22" in state.workflow_plan.chromosomes
+
+        # Workflow JSON must have been generated
+        assert state.workflow_json is not None
+        assert "processes" in state.workflow_json
+        assert len(state.workflow_json["processes"]) > 0
+
+        # Deployment must have created a namespace
         assert state.namespace != ""
+
+        # All jobs must complete with zero failures
         assert state.execution_summary is not None
-        # Full pipeline: 9 phases. Allow >= 7 for partial runs that fail late.
-        assert len(state.phase_results) >= 7
+        assert state.execution_summary.completed_tasks > 0
+        assert state.execution_summary.failed_tasks == 0
