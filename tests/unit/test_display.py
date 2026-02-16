@@ -59,6 +59,24 @@ class TestDisplayPhaseHeader:
         output = _capture_output(display_phase_header, PipelinePhase.DEPLOYMENT)
         assert "Deployment" in output
 
+    def test_provisioning_phase(self) -> None:
+        output = _capture_output(display_phase_header, PipelinePhase.PROVISIONING)
+        assert "Provisioning" in output
+
+    def test_generation_phase(self) -> None:
+        output = _capture_output(display_phase_header, PipelinePhase.GENERATION)
+        assert "Generation" in output
+
+    def test_approval_phase(self) -> None:
+        output = _capture_output(display_phase_header, PipelinePhase.APPROVAL)
+        assert "Approval" in output
+
+    def test_all_nine_phases_have_labels(self) -> None:
+        """Every PipelinePhase should have a numbered label."""
+        for phase in PipelinePhase:
+            output = _capture_output(display_phase_header, phase)
+            assert "Phase" in output, f"{phase.value} missing 'Phase' label"
+
 
 class TestDisplayWorkflowPlan:
     def test_plan_with_all_fields(self) -> None:
