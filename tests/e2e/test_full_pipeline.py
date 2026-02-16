@@ -52,7 +52,9 @@ class TestFullPipeline:
         - hyperflow-k8s-deployment charts
         """
         state = await run_pipeline(
-            "Analyze EUR population, chromosome 22, small parallelism.",
+            "Do European and African populations show different patterns "
+            "of shared deleterious mutations on chromosome 22? This is "
+            "relevant for understanding population-specific disease risks.",
             e2e_settings,
             auto_approve=True,
         )

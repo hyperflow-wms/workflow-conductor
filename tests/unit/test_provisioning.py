@@ -36,7 +36,6 @@ def _mock_kubectl() -> MagicMock:
     kubectl = MagicMock()
     kubectl.create_namespace = AsyncMock(return_value="namespace/wf-test created")
     kubectl.create_resource_quota = AsyncMock(return_value="")
-    kubectl.wait_for_job = AsyncMock(return_value="condition met")
     kubectl.get_nodes = AsyncMock(
         return_value={
             "node_count": 2,
@@ -60,6 +59,7 @@ def _mock_kind_cluster(exists: bool = True) -> MagicMock:
     cluster.create = AsyncMock()
     cluster.load_image = AsyncMock()
     cluster.use_context = AsyncMock()
+    cluster.export_kubeconfig = AsyncMock(return_value="/tmp/mock-kubeconfig.yaml")
     cluster.name = "hf-conductor"
     return cluster
 
@@ -197,5 +197,5 @@ class TestProvisioningPhase:
             )
 
             await run_provisioning_phase(state_after_validation, settings)
-        # hf-ops + hf-data = 2 helm installs
-        assert helm.upgrade_install.await_count == 2
+        # Only hf-ops is installed in provisioning (data staging is part of hf-run)
+        assert helm.upgrade_install.await_count == 1

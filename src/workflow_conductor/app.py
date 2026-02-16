@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 
 from mcp_agent.app import MCPApp
 from mcp_agent.config import (
+    AnthropicSettings,
+    GoogleSettings,
     MCPServerSettings,
     MCPSettings,
     Settings,
@@ -48,6 +50,12 @@ def create_app(settings: ConductorSettings) -> MCPApp:
                     args=settings.workflow.composer_server_args,
                 ),
             },
+        ),
+        anthropic=AnthropicSettings(
+            default_model=settings.llm.anthropic_model,
+        ),
+        google=GoogleSettings(
+            default_model=settings.llm.google_model,
         ),
     )
     return MCPApp(name="workflow-conductor", settings=mcp_settings)

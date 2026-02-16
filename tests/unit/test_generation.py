@@ -76,10 +76,10 @@ def _mock_agent_context(response: str) -> MagicMock:
     agent = MagicMock()
     llm = MagicMock()
     llm.generate_str = AsyncMock(return_value=response)
-    llm.conversation_history = [
-        {"role": "user", "content": "generate"},
-        {"role": "assistant", "content": response},
-    ]
+    # mcp-agent uses llm.history (SimpleMemory), not conversation_history
+    history_mock = MagicMock()
+    history_mock.get.return_value = []
+    llm.history = history_mock
     agent.attach_llm = AsyncMock(return_value=llm)
     agent.__aenter__ = AsyncMock(return_value=agent)
     agent.__aexit__ = AsyncMock(return_value=False)
@@ -179,6 +179,45 @@ class TestGenerationPhase:
 
         with pytest.raises(ValueError, match="Unsupported LLM provider"):
             await run_generation_phase(state_after_provisioning, settings)
+
+    @pytest.mark.asyncio
+    async def test_extracts_json_from_google_function_response(
+        self,
+        state_after_provisioning: PipelineState,
+        settings: ConductorSettings,
+    ) -> None:
+        """Google Gemini returns function_call parts; JSON is in history."""
+        # generate_str returns empty (only function_call parts, no text)
+        agent = _mock_agent_context("")
+
+        # Simulate Google-style history: tool result as function_response
+        workflow_text = json.dumps(SAMPLE_WORKFLOW_JSON)
+        result_part = MagicMock()
+        result_part.text = workflow_text
+
+        func_resp = MagicMock()
+        func_resp.response = {"result": [result_part]}
+
+        tool_part = MagicMock()
+        tool_part.function_response = func_resp
+        tool_part.text = None
+
+        tool_msg = MagicMock()
+        tool_msg.parts = [tool_part]
+        tool_msg.role = "tool"
+
+        llm = agent.attach_llm.return_value
+        llm.history.get.return_value = [tool_msg]
+
+        with patch("workflow_conductor.phases.generation.Agent", return_value=agent):
+            from workflow_conductor.phases.generation import (
+                run_generation_phase,
+            )
+
+            result = await run_generation_phase(state_after_provisioning, settings)
+        assert result.workflow_json is not None
+        assert result.workflow_json["name"] == "1000genome"
+        assert len(result.workflow_json["processes"]) == 3
 
     @pytest.mark.asyncio
     async def test_extracts_json_from_markdown(

@@ -44,7 +44,9 @@ class TestPlanningPhase:
             ' "parallelism": 4}'
         )
         mock_llm.generate_str.return_value = plan_json
-        mock_llm.conversation_history = [{"role": "assistant", "content": "planned"}]
+        history_mock = MagicMock()
+        history_mock.get.return_value = []
+        mock_llm.history = history_mock
 
         mock_agent = MagicMock()
         mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
@@ -61,7 +63,7 @@ class TestPlanningPhase:
         assert result.workflow_plan.chromosomes == ["22"]
         assert result.workflow_plan.populations == ["EUR"]
         assert result.workflow_plan.parallelism == 4
-        assert len(result.planner_history) == 1
+        assert result.planner_history == []
 
     @pytest.mark.asyncio
     async def test_planning_handles_non_json_response(self) -> None:
@@ -70,7 +72,9 @@ class TestPlanningPhase:
 
         mock_llm = AsyncMock()
         mock_llm.generate_str.return_value = "I planned a workflow for EUR chr22."
-        mock_llm.conversation_history = []
+        history_mock = MagicMock()
+        history_mock.get.return_value = []
+        mock_llm.history = history_mock
 
         mock_agent = MagicMock()
         mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
@@ -102,7 +106,9 @@ class TestPlanningPhase:
 
         mock_llm = AsyncMock()
         mock_llm.generate_str.return_value = '{"description": "test"}'
-        mock_llm.conversation_history = []
+        history_mock = MagicMock()
+        history_mock.get.return_value = []
+        mock_llm.history = history_mock
 
         mock_agent = MagicMock()
         mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)

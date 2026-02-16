@@ -26,9 +26,15 @@ class TestGenerateHelmValues:
         plan = WorkflowPlan()
         values = generate_helm_values(settings, plan, namespace="test-ns")
         engine = values["hyperflow-engine"]
-        mounts = engine["volumeMounts"]
+        mounts = engine["containers"]["hyperflow"]["volumeMounts"]
         assert any(m["name"] == "workflow-json" for m in mounts)
         assert any(m["mountPath"] == "/work_dir/workflow.json" for m in mounts)
+        # Chart defaults must be preserved
+        assert any(m["name"] == "workflow-data" for m in mounts)
+        assert any(m["name"] == "config-map" for m in mounts)
+        vols = engine["volumes"]
+        assert any(v["name"] == "workflow-json" for v in vols)
+        assert any(v["name"] == "workflow-data" for v in vols)
 
     def test_data_image(self) -> None:
         settings = ConductorSettings()

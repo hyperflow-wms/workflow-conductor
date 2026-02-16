@@ -16,7 +16,9 @@ class TestRunPipeline:
     async def test_dry_run_stops_after_validation(self) -> None:
         mock_llm = AsyncMock()
         mock_llm.generate_str.return_value = '{"description": "test"}'
-        mock_llm.conversation_history = []
+        history_mock = MagicMock()
+        history_mock.get.return_value = []
+        mock_llm.history = history_mock
 
         mock_agent = MagicMock()
         mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
@@ -45,7 +47,9 @@ class TestRunPipeline:
     async def test_abort_at_gate1_stops_pipeline(self) -> None:
         mock_llm = AsyncMock()
         mock_llm.generate_str.return_value = '{"description": "test"}'
-        mock_llm.conversation_history = []
+        history_mock = MagicMock()
+        history_mock.get.return_value = []
+        mock_llm.history = history_mock
 
         mock_agent = MagicMock()
         mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
@@ -74,7 +78,9 @@ class TestRunPipeline:
         """After provisioning+generation, user aborts at Gate 2."""
         mock_llm = AsyncMock()
         mock_llm.generate_str.return_value = '{"description": "test"}'
-        mock_llm.conversation_history = []
+        history_mock = MagicMock()
+        history_mock.get.return_value = []
+        mock_llm.history = history_mock
 
         mock_agent = MagicMock()
         mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
@@ -130,6 +136,7 @@ class TestRunPipeline:
             kind = MockKind.return_value
             kind.exists = AsyncMock(return_value=True)
             kind.use_context = AsyncMock()
+            kind.export_kubeconfig = AsyncMock(return_value="/tmp/mock-kubeconfig.yaml")
 
             state = await run_pipeline(
                 "test prompt",
@@ -148,7 +155,9 @@ class TestRunPipeline:
         """Dry run records phases 1-3 in phase_results."""
         mock_llm = AsyncMock()
         mock_llm.generate_str.return_value = '{"description": "test"}'
-        mock_llm.conversation_history = []
+        history_mock = MagicMock()
+        history_mock.get.return_value = []
+        mock_llm.history = history_mock
 
         mock_agent = MagicMock()
         mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
