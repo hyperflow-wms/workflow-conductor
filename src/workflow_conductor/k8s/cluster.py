@@ -99,9 +99,9 @@ class KindCluster:
                 return True
         return False
 
-    async def load_image(self, image: str) -> str:
+    async def load_image(self, image: str, *, skip_check: bool = False) -> str:
         """Load a Docker image into the cluster (skips if already present)."""
-        if await self.image_loaded(image):
+        if not skip_check and await self.image_loaded(image):
             logger.info("Image already in cluster: %s", image)
             return f"Image {image} already loaded"
         return await self._run(
