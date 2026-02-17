@@ -1,0 +1,18 @@
+# k3s server config for HyperFlow demo VM
+# Copied to /etc/rancher/k3s/config.yaml during k3s-install
+
+# Move containers and images to external volume
+data-dir: /media/persistence/k3s
+
+# Let user ubuntu read kubeconfig
+write-kubeconfig-mode: "0644"
+
+# Disable components not needed for HyperFlow
+# NOTE: local-storage (local-path provisioner) is kept enabled — the NFS
+# server provisioner from hf-ops needs it to provision its own backing PVC.
+disable:
+  - traefik
+
+# Label node for HyperFlow job scheduling
+node-label:
+  - "hyperflow-wms/nodepool=hfmaster"

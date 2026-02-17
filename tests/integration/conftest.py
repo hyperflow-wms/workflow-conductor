@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -55,14 +54,14 @@ async def kind_cluster(
     if not await cluster.exists():
         await cluster.create()
         created = True
-        # Load images
-        for image in [
-            settings.hf_engine_image,
-            settings.worker_image,
-            settings.data_image,
-        ]:
-            with contextlib.suppress(Exception):
-                await cluster.load_image(image)
+        # Load images in parallel (skip-if-present built into load_image)
+        import asyncio
+
+        await asyncio.gather(
+            cluster.load_image(settings.hf_engine_image),
+            cluster.load_image(settings.worker_image),
+            cluster.load_image(settings.data_image),
+        )
 
     await cluster.use_context()
 

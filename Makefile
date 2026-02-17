@@ -9,10 +9,14 @@ UV := uv
 SRC := src/workflow_conductor
 TESTS := tests
 
-# K8s
+# K8s — Kind (local dev)
 CLUSTER_NAME ?= hyperflow-test
 KIND_CONFIG := local/kind-config-1n.yaml
 K8S_DEPLOYMENT_PATH ?= ../../hyperflow-k8s-deployment
+
+# K8s — k3s (VM)
+K3S_VERSION := $(shell grep 'k3s_version:' local/k3s/version.yaml 2>/dev/null | cut -d' ' -f2)
+K3S_KUBECONFIG := /etc/rancher/k3s/k3s.yaml
 
 # --- Help ---
 .PHONY: help
@@ -129,19 +133,83 @@ cluster-status: ## Show cluster and pod status
 	helm list 2>/dev/null || true
 
 .PHONY: cluster-load-images
-cluster-load-images: cluster-ready ## Load Docker images into Kind cluster
-	kind load docker-image hyperflowwms/hyperflow:latest --name $(CLUSTER_NAME)
-	kind load docker-image hyperflowwms/1000genome-worker:1.0-je1.3.4 --name $(CLUSTER_NAME)
-	kind load docker-image hyperflowwms/1000genome-data:1.0 --name $(CLUSTER_NAME)
-	kind load docker-image broadinstitute/gatk:4.4.0.0 --name $(CLUSTER_NAME) 2>/dev/null || true
+cluster-load-images: cluster-ready ## Load Docker images into Kind cluster (skips if present)
+	@for img in hyperflowwms/hyperflow:latest \
+	            hyperflowwms/1000genome-worker:1.0-je1.3.4 \
+	            hyperflowwms/1000genome-data:1.0 \
+	            broadinstitute/gatk:4.4.0.0; do \
+		if docker exec $(CLUSTER_NAME)-worker crictl images --no-trunc 2>/dev/null \
+		   | grep -q "$$(echo $$img | cut -d: -f1)"; then \
+			echo "Already loaded: $$img"; \
+		else \
+			echo "Loading: $$img"; \
+			kind load docker-image $$img --name $(CLUSTER_NAME) 2>/dev/null || true; \
+		fi; \
+	done
 
 .PHONY: docker-pull-images
 docker-pull-images: ## Pull all required Docker images
 	docker pull hyperflowwms/hyperflow:latest
 	docker pull hyperflowwms/1000genome-worker:1.0-je1.3.4
 	docker pull hyperflowwms/1000genome-data:1.0
-	docker pull hyperflowwms/1000genome-mcp:2.1
+	docker pull hyperflowwms/1000genome-mcp:2.3
 	docker pull broadinstitute/gatk:4.4.0.0
+
+# --- k3s Cluster (VM) ---
+.PHONY: k3s-install
+k3s-install: ## Install k3s (config-driven, persistent storage)
+	@test -n "$(K3S_VERSION)" || (echo "ERROR: K3S_VERSION not set. Check local/k3s/version.yaml" && exit 1)
+	@dpkg -s nfs-common >/dev/null 2>&1 || \
+		(echo "Installing nfs-common (required for NFS volume mounts)..." && \
+		 sudo apt-get update -qq && sudo apt-get install -y -qq nfs-common)
+	sudo mkdir -p /etc/rancher/k3s
+	sudo cp local/k3s/config.yaml /etc/rancher/k3s/config.yaml
+	curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="$(K3S_VERSION)" sh -
+	@echo "Waiting for node to be Ready..."
+	@KUBECONFIG=$(K3S_KUBECONFIG) kubectl wait --for=condition=Ready nodes --all --timeout=120s
+
+.PHONY: k3s-pull-images
+k3s-pull-images: ## Pre-pull images into k3s containerd
+	@for img in hyperflowwms/hyperflow:latest \
+	            hyperflowwms/1000genome-worker:1.0-je1.3.4 \
+	            hyperflowwms/1000genome-data:1.0 \
+	            hyperflowwms/1000genome-mcp:2.3 \
+	            broadinstitute/gatk:4.4.0.0; do \
+		if sudo k3s crictl images --no-trunc 2>/dev/null | grep -q "$$(echo $$img | cut -d: -f1)"; then \
+			echo "Already present: $$img"; \
+		else \
+			echo "Pulling: $$img"; \
+			sudo k3s crictl pull "docker.io/$$img"; \
+		fi; \
+	done
+
+.PHONY: k3s-setup
+k3s-setup: k3s-install k3s-pull-images ## Full k3s setup: install + pull images
+
+.PHONY: k3s-status
+k3s-status: ## Show k3s cluster status
+	@echo "=== k3s Version ==="
+	k3s --version 2>/dev/null || echo "k3s not installed"
+	@echo ""
+	@echo "=== Nodes ==="
+	KUBECONFIG=$(K3S_KUBECONFIG) kubectl get nodes -o wide 2>/dev/null || true
+	@echo ""
+	@echo "=== Pods ==="
+	KUBECONFIG=$(K3S_KUBECONFIG) kubectl get pods -A 2>/dev/null || true
+	@echo ""
+	@echo "=== Images ==="
+	sudo k3s crictl images 2>/dev/null || true
+
+.PHONY: k3s-reset
+k3s-reset: ## Uninstall k3s and remove data (interactive)
+	@echo -n "This will remove k3s and all data in /media/persistence/k3s. Continue? [y/N] " && \
+		read answer && if [ "$${answer:-N}" = y ]; then \
+			echo "Uninstalling k3s..." ; \
+			/usr/local/bin/k3s-uninstall.sh ; \
+			sudo rm -rf /media/persistence/k3s ; \
+		else \
+			echo "Aborted." ; \
+		fi
 
 # --- Infrastructure ---
 .PHONY: infra-up

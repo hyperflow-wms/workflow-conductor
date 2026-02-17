@@ -6,6 +6,7 @@ engine pod and nfs-data job, and queries infrastructure measurements.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import tempfile
 from datetime import UTC, datetime
@@ -56,16 +57,20 @@ async def run_provisioning_phase(
         if not await cluster.exists():
             logger.info("Creating Kind cluster: %s", cluster.name)
             await cluster.create()
-            for image in [
-                settings.hf_engine_image,
-                settings.worker_image,
-                settings.data_image,
-            ]:
-                await cluster.load_image(image)
+            await asyncio.gather(
+                cluster.load_image(settings.hf_engine_image),
+                cluster.load_image(settings.worker_image),
+                cluster.load_image(settings.data_image),
+            )
 
         # Always export Kind kubeconfig for Kind clusters — the system's
         # $KUBECONFIG env var may be too long or point to wrong clusters
         settings.kubernetes.kubeconfig = await cluster.export_kubeconfig()
+    else:
+        logger.info(
+            "Using existing cluster (provider=%s)",
+            settings.kubernetes.cluster_provider,
+        )
 
     kubectl = Kubectl(kubeconfig=settings.kubernetes.kubeconfig)
     helm = Helm(kubeconfig=settings.kubernetes.kubeconfig)

@@ -192,30 +192,42 @@ async def run_data_preparation_phase(
             timeout=settings.tabix_job_timeout,
         )
 
-    # Step 5: Scan VCF files for exact row counts
+    # Step 5: Discover VCF files and scan for exact row counts.
+    # File naming varies by Composer version (e.g. ALL.chr17.250000.vcf vs
+    # ALL.chr17.brca1.vcf), so we discover them dynamically.
     logger.info("Step 3: Scanning VCF files for row counts")
-    scan_cmd = " && ".join(
-        f'echo "{c}:$(grep -c -v "^#" /work_dir/ALL.chr{c}.250000.vcf)"'
-        for c in chromosomes
+    discover_cmd = (
+        "for c in " + " ".join(chromosomes) + "; do "
+        "  vcf=$(ls /work_dir/ALL.chr${c}.*.vcf 2>/dev/null "
+        "    | grep -v annotation | grep -v sites | head -1); "
+        "  ann=$(ls /work_dir/ALL.chr${c}.*annotation*.vcf 2>/dev/null | head -1); "
+        '  if [ -n "$vcf" ]; then '
+        '    count=$(grep -c -v "^#" "$vcf"); '
+        '    echo "${c}:${count}:$(basename $vcf):$(basename ${ann:-none})"; '
+        "  fi; "
+        "done"
     )
     output = await kubectl.exec_in_pod(
         state.engine_pod_name,
-        ["/bin/sh", "-c", scan_cmd],
+        ["/bin/sh", "-c", discover_cmd],
         namespace=namespace,
         container="hyperflow",
         timeout=300,
     )
 
     # Step 6: Parse output → chromosome_data
+    # Format: "17:1234:ALL.chr17.brca1.vcf:ALL.chr17.brca1.annotation.vcf"
     state.chromosome_data = []
     for line in output.strip().splitlines():
         parts = line.split(":")
-        if len(parts) != 2:
+        if len(parts) < 3:
             continue
-        chrom, count_str = parts
-        chrom = chrom.strip()
+        chrom = parts[0].strip()
+        count_str = parts[1].strip()
+        vcf_file = parts[2].strip()
+        ann_file = parts[3].strip() if len(parts) > 3 and parts[3] != "none" else ""
         try:
-            row_count = int(count_str.strip())
+            row_count = int(count_str)
         except ValueError:
             logger.warning("Could not parse row count for chr%s: %s", chrom, count_str)
             continue
@@ -223,15 +235,12 @@ async def run_data_preparation_phase(
         state.chromosome_data.append(
             ChromosomeData(
                 chromosome=chrom,
-                vcf_file=f"ALL.chr{chrom}.250000.vcf",
+                vcf_file=vcf_file,
                 row_count=row_count,
-                annotation_file=(
-                    f"ALL.chr{chrom}.phase3_shapeit2_mvncall_integrated_v5"
-                    f".20130502.sites.annotation.vcf"
-                ),
+                annotation_file=ann_file,
             )
         )
-        logger.info("  chr%s: %d variants", chrom, row_count)
+        logger.info("  chr%s: %d variants (%s)", chrom, row_count, vcf_file)
 
     if not state.chromosome_data:
         raise ValueError("No chromosome data could be scanned from VCF files")

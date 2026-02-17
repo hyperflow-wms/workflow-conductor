@@ -67,8 +67,43 @@ class KindCluster:
             check=False,
         )
 
+    async def image_loaded(self, image: str) -> bool:
+        """Check if an image is already present in the cluster's containerd."""
+        # Parse image into repo and tag for matching crictl output
+        if ":" in image:
+            repo, tag = image.rsplit(":", 1)
+        else:
+            repo, tag = image, "latest"
+
+        node = f"{self.name}-worker"
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "exec",
+            node,
+            "crictl",
+            "images",
+            "--no-trunc",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+        except (TimeoutError, OSError):
+            return False
+        if proc.returncode != 0:
+            return False
+        # crictl output: IMAGE TAG DIGEST SIZE
+        for line in stdout.decode().splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[0].endswith(repo) and parts[1] == tag:
+                return True
+        return False
+
     async def load_image(self, image: str) -> str:
-        """Load a Docker image into the cluster."""
+        """Load a Docker image into the cluster (skips if already present)."""
+        if await self.image_loaded(image):
+            logger.info("Image already in cluster: %s", image)
+            return f"Image {image} already loaded"
         return await self._run(
             ["load", "docker-image", image, "--name", self.name],
             timeout=120,

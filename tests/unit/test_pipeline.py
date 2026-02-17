@@ -147,7 +147,9 @@ class TestRunPipeline:
 
             # Set up data preparation mocks
             data_prep_kubectl = MockDataPrepKubectl.return_value
-            data_prep_kubectl.exec_in_pod = AsyncMock(side_effect=["", "1:5000"])
+            data_prep_kubectl.exec_in_pod = AsyncMock(
+                side_effect=["", "1:5000:ALL.chr1.250000.vcf:ALL.chr1.ann.vcf"]
+            )
 
             state = await run_pipeline(
                 "test prompt",
