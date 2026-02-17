@@ -139,9 +139,10 @@ async def run_data_preparation_phase(
             "Step 1: Decompressing local data for chr%s",
             ",".join(local_chroms),
         )
+        chrom_globs = " ".join(f"ALL.chr{c}.*.vcf.gz" for c in local_chroms)
         decompress_cmd = (
             "cd /work_dir/20130502 && "
-            "for f in ALL.chr*.vcf.gz; do "
+            f"for f in {chrom_globs}; do "
             '  gunzip -c "$f" > "/work_dir/$(basename $f .gz)" ; '
             "done && "
             "cp columns.txt /work_dir/ 2>/dev/null || true && "

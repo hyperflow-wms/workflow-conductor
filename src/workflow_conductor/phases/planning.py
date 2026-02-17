@@ -135,6 +135,31 @@ def _extract_plan_data_from_history(llm: Any) -> dict[str, Any]:
                                 len(wf.get("processes", [])),
                             )
 
+    # Fallback: infer chromosomes from raw plan, workflow JSON, or download
+    # commands when the LLM used gene regions (e.g. BRCA1) instead of
+    # explicit chromosome numbers.
+    if not result.get("chromosomes"):
+        inferred: set[str] = set()
+        # From raw plan JSON (e.g. data_preparation.steps[].commands)
+        raw = result.get("raw_plan", {})
+        dp = raw.get("data_preparation", {})
+        for step in dp.get("steps", []):
+            for cmd in step.get("commands", []):
+                for m in re.finditer(r"chr(\d+)", cmd):
+                    inferred.add(m.group(1))
+        # From workflow JSON process names (e.g. "chr17-sifting-1")
+        wf = result.get("workflow_json", {})
+        for proc in wf.get("processes", []):
+            name = proc.get("name", "")
+            for m in re.finditer(r"chr(\d+)", name):
+                inferred.add(m.group(1))
+        if inferred:
+            result["chromosomes"] = sorted(inferred, key=int)
+            logger.info(
+                "Inferred chromosomes from plan/workflow: %s",
+                result["chromosomes"],
+            )
+
     logger.info(
         "Extracted from history: chromosomes=%s populations=%s",
         result.get("chromosomes", []),
