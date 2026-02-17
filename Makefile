@@ -47,7 +47,7 @@ typecheck: ## Run type checker (mypy)
 # --- Testing ---
 .PHONY: test
 test: ## Run unit tests
-	$(UV) run pytest $(TESTS)/unit -v
+	$(UV) run pytest $(TESTS)/unit -v --durations=10
 
 .PHONY: test-integration
 test-integration: cluster-ready ## Run integration tests (requires Kind cluster)
@@ -80,8 +80,13 @@ run-query: ## Run with custom prompt (usage: make run-query Q="...")
 	$(UV) run workflow-conductor run "$(Q)"
 
 .PHONY: demo
-demo: ## Run conductor in demo mode (explanations + pauses)
+demo: ## Run conductor in interactive demo mode (explanations + pauses)
 	$(UV) run workflow-conductor run --demo --auto-approve \
+		"Do European and African populations show different patterns of shared deleterious mutations on chromosome 1?"
+
+.PHONY: demo-test
+demo-test: ## Run conductor in non-interactive demo mode (no pauses)
+	$(UV) run workflow-conductor run --demo --auto-approve --no-pause \
 		"Do European and African populations show different patterns of shared deleterious mutations on chromosome 1?"
 
 .PHONY: run-debug
