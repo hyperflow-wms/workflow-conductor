@@ -135,18 +135,26 @@ def _extract_plan_data_from_history(llm: Any) -> dict[str, Any]:
                                 len(wf.get("processes", [])),
                             )
 
+    # Also extract download_commands directly from raw_plan so they're
+    # available even when chromosomes are inferred from workflow_json only.
+    if not result.get("download_commands"):
+        raw = result.get("raw_plan", {})
+        dp = raw.get("data_preparation", {})
+        cmds: list[str] = []
+        for step in dp.get("steps", []):
+            cmds.extend(step.get("commands", []))
+        if cmds:
+            result["download_commands"] = cmds
+
     # Fallback: infer chromosomes from raw plan, workflow JSON, or download
     # commands when the LLM used gene regions (e.g. BRCA1) instead of
     # explicit chromosome numbers.
     if not result.get("chromosomes"):
         inferred: set[str] = set()
-        # From raw plan JSON (e.g. data_preparation.steps[].commands)
-        raw = result.get("raw_plan", {})
-        dp = raw.get("data_preparation", {})
-        for step in dp.get("steps", []):
-            for cmd in step.get("commands", []):
-                for m in re.finditer(r"chr(\d+)", cmd):
-                    inferred.add(m.group(1))
+        # From download commands (e.g. "tabix ... chr17:...")
+        for cmd in result.get("download_commands", []):
+            for m in re.finditer(r"chr(\d+)", cmd):
+                inferred.add(m.group(1))
         # From workflow JSON process names (e.g. "chr17-sifting-1")
         wf = result.get("workflow_json", {})
         for proc in wf.get("processes", []):
@@ -233,6 +241,13 @@ async def run_planning_phase(
     download_commands: list[str] = []
     for step in dp.get("steps", []):
         download_commands.extend(step.get("commands", []))
+    # Fallback: use download_commands extracted from LLM history
+    if not download_commands and history_data.get("download_commands"):
+        download_commands = history_data["download_commands"]
+        logger.info(
+            "Using %d download commands from history fallback",
+            len(download_commands),
+        )
     if download_commands:
         logger.info("Extracted %d download commands from plan", len(download_commands))
 
