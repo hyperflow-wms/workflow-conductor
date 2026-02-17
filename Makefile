@@ -82,12 +82,12 @@ run-query: ## Run with custom prompt (usage: make run-query Q="...")
 .PHONY: demo
 demo: ## Run conductor in interactive demo mode (explanations + pauses)
 	$(UV) run workflow-conductor run --demo --auto-approve \
-		"Do European and African populations show different patterns of shared deleterious mutations on chromosome 1?"
+		"Analyze BRCA1 gene variants in the British population"
 
 .PHONY: demo-test
 demo-test: ## Run conductor in non-interactive demo mode (no pauses)
 	$(UV) run workflow-conductor run --demo --auto-approve --no-pause \
-		"Do European and African populations show different patterns of shared deleterious mutations on chromosome 1?"
+		"Analyze BRCA1 gene variants in the British population"
 
 .PHONY: run-debug
 run-debug: ## Run conductor in debug mode
@@ -140,7 +140,7 @@ docker-pull-images: ## Pull all required Docker images
 	docker pull hyperflowwms/hyperflow:latest
 	docker pull hyperflowwms/1000genome-worker:1.0-je1.3.4
 	docker pull hyperflowwms/1000genome-data:1.0
-	docker pull hyperflowwms/1000genome-mcp:2.0
+	docker pull hyperflowwms/1000genome-mcp:2.1
 	docker pull broadinstitute/gatk:4.4.0.0
 
 # --- Infrastructure ---

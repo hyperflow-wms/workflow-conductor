@@ -48,7 +48,7 @@ class TestConductorSettingsDefaults:
 
     def test_default_composer_server_args_contain_image(self) -> None:
         assert (
-            "hyperflowwms/1000genome-mcp:2.0"
+            "hyperflowwms/1000genome-mcp:2.1"
             in _defaults().workflow.composer_server_args
         )
 
