@@ -378,12 +378,33 @@ class Kubectl:
         *,
         current_namespace: str = "",
     ) -> None:
-        """Clean up namespaces and cluster-scoped resources from previous runs.
+        """Deep cleanup of namespaces, PVs, and cluster-scoped resources.
 
-        Deletes all namespaces matching the prefix (except current_namespace),
-        and removes orphaned cluster-scoped resources left by hf-ops.
+        Prevents disk exhaustion on the NFS provisioner by cleaning up:
+        1. Released PersistentVolumes (free disk space first)
+        2. Old namespaces matching the prefix
+        3. Namespaces stuck in Terminating state (force-remove finalizers)
+        4. Orphaned cluster-scoped resources from hf-ops and hf-run
         """
-        # Find and delete old namespaces
+        # Step 1: Delete PersistentVolumes in Released state (reclaim disk)
+        pv_output = await self._run(
+            [
+                "get",
+                "pv",
+                "-o",
+                'jsonpath={.items[?(@.status.phase=="Released")].metadata.name}',
+            ],
+            check=False,
+        )
+        for pv_name in pv_output.split():
+            if pv_name.strip():
+                logger.info("Deleting released PV: %s", pv_name)
+                await self._run(
+                    ["delete", "pv", pv_name, "--ignore-not-found"],
+                    check=False,
+                )
+
+        # Step 2: Delete old namespaces (non-blocking)
         output = await self._run(
             ["get", "namespaces", "-o", "jsonpath={.items[*].metadata.name}"],
             check=False,
@@ -393,10 +414,37 @@ class Kubectl:
                 logger.info("Cleaning up old namespace: %s", ns)
                 await self.delete_namespace(ns)
 
-        # Delete orphaned cluster-scoped resources from hf-ops and hf-run
+        # Step 3: Force-remove namespaces stuck in Terminating state
+        term_output = await self._run(
+            [
+                "get",
+                "namespaces",
+                "-o",
+                'jsonpath={.items[?(@.status.phase=="Terminating")].metadata.name}',
+            ],
+            check=False,
+        )
+        for ns in term_output.split():
+            if ns.startswith(namespace_prefix) and ns != current_namespace:
+                logger.info("Force-removing stuck namespace: %s", ns)
+                await self._run(
+                    [
+                        "patch",
+                        "namespace",
+                        ns,
+                        "--type=merge",
+                        "-p",
+                        '{"metadata":{"finalizers":null}}',
+                    ],
+                    check=False,
+                )
+
+        # Step 4: Delete orphaned cluster-scoped resources
         for resource in [
             "clusterrole/hf-ops-nfs-server-provisioner",
+            "clusterrole/hyperflow-worker-pool-operator-role-cluster",
             "clusterrolebinding/hf-ops-nfs-server-provisioner",
+            "clusterrolebinding/hyperflow-worker-pool-operator-rolebinding-cluster",
             "clusterrolebinding/serviceaccounts-cluster-admin-hf-run",
             "storageclass/nfs",
         ]:

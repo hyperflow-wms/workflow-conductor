@@ -20,7 +20,7 @@ This plan merges two source plans. The table below shows the origin of each deci
 | **Code depth** | User decision | Conceptual only (signatures + patterns, not full implementations) | Yes |
 | **Data models** | v6 | Rich PipelineState with `synthesize_context_for_composer()`, v2 hooks | Yes |
 | **Configuration** | v6 | Nested pydantic-settings, `HF_CONDUCTOR_` prefix, `__` delimiter | Yes |
-| **Workflow delivery** | v6 | ConfigMap mount (not kubectl cp) | Yes — confirmed |
+| **Workflow delivery** | v6→Stage 2.6 | Conductor signal pattern (`kubectl cp` + `.conductor-ready`). Originally ConfigMap mount; changed in Stage 2.6 | Yes — updated |
 | **CLI name** | v6 | `workflow-conductor` | Yes — confirmed |
 | **Python tooling** | v6 | uv | Yes |
 | **PR strategy** | v6 | 7 PRs with branch names, file lists, review focus | Yes |
@@ -48,7 +48,7 @@ This plan merges two source plans. The table below shows the origin of each deci
 1. [Context & Architecture Decisions](#1-context--architecture-decisions)
 2. [Project Structure](#2-project-structure)
 3. [Key Models (models.py)](#3-key-models-modelspy)
-4. [Pipeline Flow (MVP)](#4-pipeline-flow-mvp)
+4. [Pipeline Flow](#4-pipeline-flow)
 5. [Deploy Phase Details](#5-deploy-phase-details)
 6. [mcp-agent Integration Patterns](#6-mcp-agent-integration-patterns)
 7. [Configuration (config.py)](#7-configuration-configpy)
@@ -56,6 +56,7 @@ This plan merges two source plans. The table below shows the origin of each deci
 9. [Testing Plan](#9-testing-plan)
 10. [Implementation Stages](#10-implementation-stages)
 11. [PR Breakdown for Stage 1](#11-pr-breakdown-for-stage-1)
+11b. [PR Breakdown for Stage 2](#11b-pr-breakdown-for-stage-2)
 12. [Verification Plan](#12-verification-plan)
 13. [Risks & Mitigations](#13-risks--mitigations)
 14. [Documentation Plan](#14-documentation-plan)
@@ -102,7 +103,7 @@ User (natural language)
 | 3 | LLM providers | **Anthropic Claude + Google Gemini** | Configurable via mcp-agent settings; factory pattern supports provider switching |
 | 4 | K8s tooling | **subprocess helm/kubectl** for MVP | No mature Python Helm library; matches `fast-test.sh` exactly; kagent-tool-server for later stages |
 | 5 | Runtime location | **Outside K8s** (developer machine) | Simplifies MVP debugging; no pod-level networking complexity |
-| 6 | Workflow delivery | **ConfigMap mount** | Survives pod restarts, unlike `kubectl cp`; matches Helm chart patterns |
+| 6 | Workflow delivery | **Conductor signal pattern** | Engine waits for `.conductor-ready`; conductor copies workflow.json via `kubectl cp` then touches signal file. Replaced ConfigMap mount in Stage 2.6 |
 | 7 | Package layout | `src/workflow_conductor/` | Standard Python src layout (PEP 517/621) |
 | 8 | Config | **pydantic-settings** | Type-safe config with env var override and `.env` file support |
 | 9 | CLI | **Click + Rich** | Rich terminal UI for plan display, progress bars, and user prompts |
@@ -137,15 +138,20 @@ workflow-conductor/
 │       ├── cli.py                    # Click CLI entry point
 │       ├── config.py                 # pydantic-settings: ConductorSettings
 │       ├── models.py                 # PipelineState, PhaseResult, all data contracts
+│       ├── retry.py                  # Retry logic with exponential backoff
 │       │
 │       ├── phases/
 │       │   ├── __init__.py
 │       │   ├── routing.py            # Phase 1: Intent classification (MVP: hardcoded)
 │       │   ├── planning.py           # Phase 2: Workflow planning via Composer MCP
 │       │   ├── validation.py         # Phase 3: User validation gate (Rich prompts)
-│       │   ├── deployment.py         # Phase 4: Deploy & execute on K8s
-│       │   ├── monitoring.py         # Phase 5: Execution monitoring
-│       │   └── completion.py         # Phase 6: Teardown & reporting
+│       │   ├── provisioning.py       # Phase 4: K8s cluster setup, infra, measurements
+│       │   ├── data_preparation.py   # Phase 5: Decompress data, scan row counts, tabix
+│       │   ├── generation.py         # Phase 6: Deferred workflow.json via Composer MCP
+│       │   ├── approval.py           # Phase 7: Execution approval gate (Gate 2)
+│       │   ├── deployment.py         # Phase 8: kubectl cp + conductor signal
+│       │   ├── monitoring.py         # Phase 9: Execution monitoring
+│       │   └── completion.py         # Phase 10: Teardown & reporting
 │       │
 │       ├── k8s/
 │       │   ├── __init__.py
@@ -168,7 +174,20 @@ workflow-conductor/
 │   │   ├── test_helm.py
 │   │   ├── test_kubectl.py
 │   │   ├── test_helm_values.py
-│   │   └── test_phases.py
+│   │   ├── test_phases.py
+│   │   ├── test_cli.py
+│   │   ├── test_display.py
+│   │   ├── test_prompts.py
+│   │   ├── test_pipeline.py
+│   │   ├── test_provisioning.py
+│   │   ├── test_data_preparation.py
+│   │   ├── test_generation.py
+│   │   ├── test_planning.py
+│   │   ├── test_approval.py
+│   │   ├── test_deployment.py
+│   │   ├── test_monitoring.py
+│   │   ├── test_retry.py
+│   │   └── test_demo.py
 │   ├── integration/
 │   │   ├── __init__.py
 │   │   ├── conftest.py               # Kind cluster fixture (session-scoped)
@@ -195,7 +214,7 @@ workflow-conductor/
 ### Design Rationale
 
 - **`phases/` directory with one module per phase**: Each phase is independently navigable and reduces merge conflicts when multiple developers work on different phases. Phase modules are thin — they call into k8s/ and use models from models.py.
-- **6 MVP phase files only**: The MVP implements 6 phases: routing, planning, validation, deployment, monitoring, completion. Additional phases (profiling, provisioning, generation, approval) are added in later stages.
+- **10 phase files**: The pipeline implements 10 phases: routing, planning, validation, provisioning, data_preparation, generation, approval, deployment, monitoring, completion. MVP started with 6; Stage 2 added provisioning, generation, approval; Stage 2.6 added data_preparation.
 - **`k8s/` subpackage with 4 focused modules**: Clean testable boundary between orchestration logic and infrastructure operations. These modules can be unit-tested with mocked subprocess, integration-tested against Kind, and replaced later (e.g., kagent MCP).
 - **All models in one `models.py`**: All data contracts in one file prevents circular imports and is easy to navigate. Models are Pydantic BaseModel with JSON-serializable fields for Temporal compatibility.
 - **No `utils/` directory**: Avoid premature abstractions. If timing or logging helpers are needed, add them when needed, not speculatively.
@@ -210,19 +229,23 @@ All models use Pydantic `BaseModel`. No stdlib `@dataclass`. JSON serialization 
 ### Enums
 
 ```python
-class PipelinePhase(str, Enum):
-    """Pipeline phases for the MVP 6-phase architecture.
-    Additional phases (PROFILING, PROVISIONING, WORKFLOW_GENERATION,
-    EXECUTION_APPROVAL) are added in later stages.
+class PipelinePhase(StrEnum):
+    """10-phase pipeline (Stage 2.6).
+    MVP had 6 phases; Stage 2 added PROVISIONING, GENERATION, APPROVAL;
+    Stage 2.6 added DATA_PREPARATION.
     """
     ROUTING = "routing"
     PLANNING = "planning"
     VALIDATION = "validation"
+    PROVISIONING = "provisioning"
+    DATA_PREPARATION = "data_preparation"
+    GENERATION = "generation"
+    APPROVAL = "approval"
     DEPLOYMENT = "deployment"
     MONITORING = "monitoring"
     COMPLETION = "completion"
 
-class PipelineStatus(str, Enum):
+class PipelineStatus(StrEnum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     AWAITING_USER = "awaiting_user"
@@ -275,6 +298,26 @@ class ResourceProfile(BaseModel):
     memory_limit: str = ""
     confidence: float = 0.0
     source: str = ""  # "profiler" or "composer"
+```
+
+### Stage 2 Models
+
+```python
+class ChromosomeData(BaseModel):
+    """Per-chromosome data for workflow generation.
+    Feeds into the Composer's generate_workflow tool.
+    Row counts may be estimated or exact (from staged file scanning).
+    """
+    chromosome: str = ""
+    vcf_file: str = ""
+    row_count: int = 0
+    annotation_file: str = ""
+
+class RetryPolicy(BaseModel):
+    """Configuration for phase retry behavior."""
+    max_retries: int = 3
+    backoff_base: float = 2.0
+    retryable_errors: list[str] = Field(default_factory=list)
 ```
 
 ### Supporting Models
@@ -336,6 +379,7 @@ class PipelineState(BaseModel):
 
     # Phase outputs (accumulated across the pipeline)
     workflow_plan: WorkflowPlan | None = None
+    chromosome_data: list[ChromosomeData] = Field(default_factory=list)
     resource_profiles: list[ResourceProfile] = Field(default_factory=list)
     infrastructure: InfrastructureMeasurements | None = None
     workflow_json: dict[str, Any] | None = None
@@ -396,9 +440,9 @@ class PipelineState(BaseModel):
 
 ---
 
-## 4. Pipeline Flow (MVP)
+## 4. Pipeline Flow
 
-The MVP implements 6 phases. Phases for profiling, deferred generation, and execution approval are added in later stages.
+The conductor implements a 10-phase pipeline (updated in Stage 2.6).
 
 ```
 User NL Prompt
@@ -415,9 +459,10 @@ User NL Prompt
 +-------------------------------------------------------------------------+
 |  PHASE 2: PLANNING                                                      |
 |  Planner Agent calls Composer MCP tools:                                |
-|    1. plan_workflow(intent) -> WorkflowPlan                             |
+|    1. plan_workflow(intent) -> WorkflowPlan + data_preparation commands |
 |    2. estimate_variants(regions) -> size estimates                      |
-|  Output: WorkflowPlan (plan + planner_history for context replay)       |
+|  Extracts download_commands from raw_plan.data_preparation.steps        |
+|  Output: WorkflowPlan (plan + planner_history + download_commands)      |
 +-----------------------------+-------------------------------------------+
                               |
                               v
@@ -433,36 +478,73 @@ User NL Prompt
                               | (rejected -> abort)
                               v
 +-------------------------------------------------------------------------+
-|  PHASE 4: DEPLOYMENT                                                    |
+|  PHASE 4: PROVISIONING                                                  |
 |  1. Ensure Kind cluster exists (or connect to existing)                 |
-|  2. Create namespace, install hf-ops, create ResourceQuota              |
-|  3. Stage data via hf-data Helm chart                                   |
-|  4. Generate workflow.json via Composer MCP (estimate_variants +        |
-|     generate_workflow) using estimated counts (MVP)                      |
-|  5. Inject workflow.json via ConfigMap                                   |
-|  6. helm upgrade --install hf-run with generated values                 |
-|  7. Wait for engine pod readiness                                       |
-|  Output: helm_release_name, engine_pod_name                             |
+|  2. Create namespace, install hf-ops (NFS provisioner, Redis)           |
+|  3. Create ResourceQuota, clean up previous runs                        |
+|  4. Install hf-run (engine waits for conductor signal)                  |
+|  5. Wait for engine pod readiness                                       |
+|  6. Wait for nfs-data job (data container staging)                      |
+|  7. Measure infrastructure (nodes, CPU, memory)                         |
+|  Output: namespace, engine_pod_name, helm_release_name,                 |
+|          infrastructure_measurements                                    |
 +-----------------------------+-------------------------------------------+
                               |
                               v
 +-------------------------------------------------------------------------+
-|  PHASE 5: MONITORING                                                    |
+|  PHASE 5: DATA PREPARATION                                              |
+|  Splits chromosomes into local (chr1-10) and remote (chr11+):          |
+|    Local: decompress VCF/annotation files from /work_dir/20130502/     |
+|           to /work_dir/ via exec in engine pod                          |
+|    Remote: create K8s Job (broadinstitute/gatk:4.4.0.0) with           |
+|            Composer-generated download commands (tabix or curl|gunzip)  |
+|            mounted on NFS PVC, wait for job completion                  |
+|  Scan all VCF files for exact row counts (grep -c)                     |
+|  Output: chromosome_data (vcf_file, row_count, annotation_file)        |
++-----------------------------+-------------------------------------------+
+                              |
+                              v
++-------------------------------------------------------------------------+
+|  PHASE 6: GENERATION                                                    |
+|  Generate workflow.json via Composer MCP (generate_workflow) using      |
+|  exact row counts from chromosome_data + context replay from planner   |
+|  Output: workflow_json dict                                             |
++-----------------------------+-------------------------------------------+
+                              |
+                              v
++-------------------------------------------------------------------------+
+|  PHASE 7: APPROVAL                                               <-- HUMAN |
+|  Display execution preview: real task counts, memory estimates          |
+|  User: approve / abort                                                  |
+|  Output: user_approved_execution (bool)                                 |
++-----------------------------+-------------------------------------------+
+                              | (rejected -> abort)
+                              v
++-------------------------------------------------------------------------+
+|  PHASE 8: DEPLOYMENT                                                    |
+|  1. Write workflow.json to temp file                                    |
+|  2. kubectl cp workflow.json to engine pod /work_dir/                   |
+|  3. Touch /work_dir/.conductor-ready (signal engine to start)           |
+|  Output: workflow_json_path                                             |
++-----------------------------+-------------------------------------------+
+                              |
+                              v
++-------------------------------------------------------------------------+
+|  PHASE 9: MONITORING                                                    |
 |  Poll workflow status:                                                  |
-|    - kubectl logs -f (engine container)                                 |
-|    - Track job completion (K8s Jobs with app=hyperflow label)           |
+|    - Track K8s Job completion (app=hyperflow label)                     |
+|    - Rich progress bar showing task completion                          |
 |    - Detect failures / stuck states                                     |
-|  Rich progress bar showing task completion                              |
-|  Output: workflow_status, task_completion_count                         |
+|  Output: execution_summary (total/completed/failed tasks, runtime)      |
 +-----------------------------+-------------------------------------------+
                               |
                               v
 +-------------------------------------------------------------------------+
-|  PHASE 6: COMPLETION                                                    |
-|  1. Collect execution logs and metrics                                  |
+|  PHASE 10: COMPLETION                                                   |
+|  1. Collect execution summary and metrics                               |
 |  2. Report: total time, tasks completed, resource usage                 |
 |  3. Optional: helm delete hf-run + hf-ops (teardown)                   |
-|  4. Display summary via Rich                                            |
+|  4. Display Rich summary panel                                          |
 |  Output: execution_time, output_files, teardown_completed               |
 +-------------------------------------------------------------------------+
 ```
@@ -480,7 +562,9 @@ This replicates what `fast-test.sh` does, but programmatically from Python using
 - Redis on master node for workflow state management
 - Job-based execution: engine renders job-template.yaml with task-specific variables (`${containerName}`, `${cpuRequest}`, `${memRequest}`, `${command}`) and creates K8s Jobs on hfworker nodes
 
-### Deploy Sequence (10 Steps)
+### Provisioning Phase (Phase 4: `phases/provisioning.py`)
+
+Steps 0–7 run during the PROVISIONING phase, before data preparation and workflow generation.
 
 **Step 0: Kind Cluster Setup (if needed)**
 
@@ -496,19 +580,27 @@ kind create cluster --name hyperflow-test \
 kind load docker-image hyperflowwms/hyperflow:latest --name hyperflow-test
 kind load docker-image hyperflowwms/1000genome-worker:1.0-je1.3.4 --name hyperflow-test
 kind load docker-image hyperflowwms/1000genome-data:1.0 --name hyperflow-test
+kind load docker-image broadinstitute/gatk:4.4.0.0 --name hyperflow-test
 
 # Switch context
 kubectl config use-context kind-hyperflow-test
 ```
 
-**Step 1: Create Workflow Namespace**
+**Step 1: Clean up previous runs**
+
+```bash
+helm uninstall hf-run --namespace {prev_namespace} 2>/dev/null || true
+# Also cleans cluster-scoped resources: ClusterRoles, ClusterRoleBindings, StorageClass
+```
+
+**Step 2: Create Workflow Namespace**
 
 ```bash
 kubectl create namespace {namespace}
 # e.g., namespace = "wf-1000g-20260212-abc123"
 ```
 
-**Step 2: Install hyperflow-ops (infrastructure)**
+**Step 3: Install hyperflow-ops (infrastructure)**
 
 ```bash
 helm upgrade --install hf-ops charts/hyperflow-ops \
@@ -520,7 +612,7 @@ helm upgrade --install hf-ops charts/hyperflow-ops \
 
 This installs: NFS server provisioner (emptyDir for local), RabbitMQ (message broker), KEDA (autoscaler), Worker Pool Operator (CRD + controller). All ops components use `nodeSelector: hyperflow-wms/nodepool: hfmaster`.
 
-**Step 3: Create ResourceQuota (CRITICAL)**
+**Step 4: Create ResourceQuota (CRITICAL)**
 
 ```bash
 kubectl create -n {namespace} quota hflow-requests \
@@ -529,70 +621,68 @@ kubectl create -n {namespace} quota hflow-requests \
 
 Required by Worker Pool Operator — it checks quota to determine scaling limits. Without this, worker pool autoscaling will not function.
 
-**Step 4: Stage data**
-
-```bash
-helm upgrade --install hf-data charts/hyperflow-nfs-data \
-    --namespace {namespace}
-```
-
-Uses `hyperflowwms/1000genome-data` image which copies VCF files, annotations, and population files to NFS PVC.
-
-**Step 5: Wait for data staging completion**
-
-```bash
-kubectl wait --for=condition=complete job/hf-data \
-    --namespace {namespace} --timeout=300s
-```
-
-**Step 6: Clean up previous hf-run (if exists)**
-
-```bash
-helm uninstall hf-run --namespace {namespace} 2>/dev/null || true
-kubectl wait --for=delete pod -l component=hyperflow-engine \
-    --namespace {namespace} --timeout=60s 2>/dev/null || true
-```
-
-**Step 7: Create ConfigMap with generated workflow.json**
-
-```bash
-kubectl create configmap workflow-json \
-    --namespace {namespace} \
-    --from-file=workflow.json={workflow_json_path} \
-    --dry-run=client -o yaml | kubectl apply -f -
-```
-
-Uses dry-run + apply pattern for idempotent creation.
-
-**Step 8: Install hyperflow-run**
+**Step 5: Install hyperflow-run (engine waits for conductor signal)**
 
 ```bash
 helm upgrade --install hf-run charts/hyperflow-run \
     --namespace {namespace} \
     --dependency-update \
-    -f {base_values} \
     -f {generated_values} \
-    --set hyperflow-engine.containers.hyperflow.image={hf_engine_image} \
-    --set hyperflow-engine.containers.worker.image={worker_image} \
-    --set hyperflow-nfs-data.workflow.image={data_image} \
-    --set hyperflow-engine.containers.hyperflow.autoRun=true \
     --wait --timeout 10m
 ```
 
-**Step 9: Wait for engine pod readiness**
+The engine command is overridden via Helm values to wait for `/work_dir/.conductor-ready` before running `hflow`. This prevents the engine from running the default workflow.json shipped by the data image before the conductor can overwrite it with the generated one. Data staging (hf-nfs-data Job) runs as a sub-chart of hf-run.
+
+**Step 6: Wait for engine pod + data staging**
 
 ```bash
 kubectl wait -n {namespace} --for=condition=ready \
     pod -l component=hyperflow-engine --timeout=5m
+
+kubectl wait -n {namespace} --for=condition=complete \
+    job -l role=nfs-data --timeout=5m
 ```
 
-Record `engine_pod_name` for monitoring phase.
+Record `engine_pod_name` for data preparation and deployment phases.
 
-**Step 10: Hand off to MONITORING phase**
+**Step 7: Query infrastructure measurements**
 
-### Workflow.json Delivery via ConfigMap
+Query cluster nodes for vCPU, memory, node count, K8s version. Stored in `state.infrastructure`.
 
-The generated workflow.json is stored in a Kubernetes ConfigMap and mounted into the HyperFlow engine pod at `/work_dir/workflow.json`. This is more K8s-native than `kubectl cp` and survives pod restarts. The `generate_helm_values()` function adds the appropriate volume + volumeMount configuration to the Helm values.
+### Data Preparation Phase (Phase 5: `phases/data_preparation.py`)
+
+Decompresses VCF data and scans row counts. Supports both local (chr1-10 from data container) and remote (chr11+ via tabix/curl K8s Job) chromosomes.
+
+```
+LOCAL (chr1-10):  exec_in_pod → gunzip → scan row counts
+REMOTE (chr11+):  K8s Job (gatk:4.4.0.0) → curl/tabix → scan row counts
+```
+
+### Deployment Phase (Phase 8: `phases/deployment.py`)
+
+Simplified to conductor signal pattern only — all infrastructure setup moved to provisioning.
+
+**Step 1: Write workflow.json to temp file**
+
+**Step 2: Copy to engine pod**
+
+```bash
+kubectl cp /tmp/workflow.json {namespace}/{engine_pod}:/work_dir/workflow.json \
+    -c hyperflow
+```
+
+**Step 3: Signal engine to start**
+
+```bash
+kubectl exec -n {namespace} {engine_pod} -c hyperflow -- \
+    touch /work_dir/.conductor-ready
+```
+
+**Step 4: Hand off to MONITORING phase**
+
+### Workflow.json Delivery via Conductor Signal Pattern
+
+The generated workflow.json is copied to the engine pod via `kubectl cp` and the engine is signaled to start by touching `/work_dir/.conductor-ready`. The engine command (set via Helm values) waits for this signal file before running `hflow run workflow.json`. This replaced the original ConfigMap mount approach in Stage 2.6 because the data image's default workflow.json was overwriting the ConfigMap-mounted one on the NFS volume.
 
 ### Helm Chart Paths
 
@@ -1238,9 +1328,9 @@ jobs:
 - Structured error model: `PipelineError` with phase, error_type, recoverable, suggested_action
 - Basic retry logic for transient failures (network errors, pod scheduling delays)
 
-**Updated Pipeline Flow:**
+**Updated Pipeline Flow (10 phases, updated in Stage 2.6):**
 ```
-ROUTING -> PLANNING -> VALIDATION (Gate 1) -> PROVISIONING -> GENERATION -> APPROVAL (Gate 2) -> DEPLOYMENT -> MONITORING -> COMPLETION
+ROUTING -> PLANNING -> VALIDATION (Gate 1) -> PROVISIONING -> DATA_PREPARATION -> GENERATION -> APPROVAL (Gate 2) -> DEPLOYMENT -> MONITORING -> COMPLETION
 ```
 
 **Acceptance Criteria:**
@@ -1289,19 +1379,110 @@ ROUTING -> PLANNING -> VALIDATION (Gate 1) -> PROVISIONING -> GENERATION -> APPR
 - Anticipated: MCP Docker stdio, LLM parsing edge cases, timeout tuning, cleanup fixtures
 - Requires: Docker + Kind + loaded images + LLM API key
 
+**PR 2.10: Full E2E Pipeline Fix** (`fix/full-e2e-validation`) → PR #18, `v0.2.5-full-e2e`
+- Extract structured data (chromosomes, populations, workflow JSON) from Google Gemini's `function_call`/`function_response` history
+- Skip redundant LLM call when planning already produced `workflow_json` (Gemini calls all 5 Composer tools in one shot)
+- Include complete volumes/volumeMounts lists in Helm values (Helm replaces, not merges, list values)
+- Set NFS PVC to 10Gi for Kind clusters
+- Export Kind kubeconfig to temp file to avoid KUBECONFIG env var length issues
+- Pass anthropic/google model settings to mcp-agent Settings
+- Clean orphaned cluster-scoped K8s resources between test runs
+- E2E test prompt: EUR/AFR chr22 comparison (57 processes) instead of BRCA (118 processes) for Docker VM limits
+- Verified: full E2E passes — 9 phases, 52/52 jobs completed in 2.7 min
+
+**PR 2.11: Tighten E2E Assertions** (`fix/tighten-e2e-assertions`) → PR #19, `v0.2.6-tight-e2e`
+- Assert `status == COMPLETED` instead of accepting `COMPLETED|FAILED`
+- Assert exactly 9 phase results instead of `>= 7`
+- Verify `workflow_plan` contains expected chromosome
+- Verify `workflow_json` has processes with length > 0
+- Verify `execution_summary.completed_tasks > 0` and `failed_tasks == 0`
+
 **Dependency Graph:**
 ```
 PR 2.7 (Config + fixtures) ──→ PR 2.8 (Integration on Kind) ──→ PR 2.9 (E2E full pipeline)
      make ci only                  Docker + Kind                    Docker + Kind + LLM
+                                                                         │
+                                                                         v
+                                                               PR 2.10 (Full E2E fix)
+                                                                         │
+                                                                         v
+                                                               PR 2.11 (Tighten assertions)
 ```
 
 **Acceptance Criteria:**
-1. `make ci` passes (144+ unit tests, lint, typecheck)
-2. `make test-integration` passes on Kind (5+ tests, no LLM tokens)
+1. `make ci` passes (147+ unit tests, lint, typecheck)
+2. `make test-integration` passes on Kind (6+ tests, no LLM tokens)
 3. `make test-e2e` passes (dry-run + full pipeline, with LLM tokens)
-4. `make setup && make test-all` works from a clean slate
+4. Full pipeline: 52/52 jobs completed, 0 failed, status == COMPLETED
+5. `make setup && make test-all` works from a clean slate
 
-**Estimated Size:** ~240 lines across 3 PRs
+**Estimated Size:** ~400 lines across 5 PRs
+
+---
+
+### Stage 2.5.1: Demo Mode & Hardening ✅ COMPLETED
+
+**Goal:** Add a presentation-friendly demo mode and production hardening (guardrails, cleanup, UI improvements).
+
+**Why:** After E2E validation proved the pipeline works end-to-end, demo mode was needed for presentations and live demonstrations. Several hardening improvements were also pushed directly to main.
+
+**PR 2.11a: Demo Mode** (`feature/demo-mode`) → PR #20, `v0.3.0-demo`
+- `--demo` CLI flag and `make demo` target for presentation use
+- Explanation panels (magenta border) before each of the 9 pipeline phases
+- Pauses after each phase for the presenter (Press Enter to continue)
+- Workflow JSON summary (process count by type, signal count) after generation
+- Skip teardown in completion phase so cluster stays up for live inspection
+- "DEMO MODE" shown in pipeline banner when active
+- New: `config.py` `demo: bool = False`, `ui/display.py` display functions
+- 8 new tests (explanations, summary, pause, banner)
+
+**Direct commits to main (hardening):**
+- `02eba81` Add `max_workflow_processes` guardrail to reject oversized workflows
+- `5573334` Add cleanup of previous runs at start and teardown at end of demo
+- `edfb249` Show workflow.json size, chromosomes in execution preview
+- `ed2f5d9` Include hf-run cluster-scoped resources in cleanup
+
+**Note:** PR #21 (`fix/workflow-json-overwrite`) introduced the conductor signal pattern but was superseded by PR #22 which incorporated the same changes as part of the DATA_PREPARATION phase. PR #21 remains open but is stale.
+
+**Acceptance Criteria:**
+1. `make ci` passes (158+ unit tests, lint, typecheck)
+2. `make demo` runs full pipeline with explanations, pauses, no teardown
+3. `make run` behavior unchanged (demo defaults to False)
+4. Workflows exceeding `max_workflow_processes` (200) are rejected before deployment
+
+---
+
+### Stage 2.6: Data Preparation & Remote Extraction ✅ COMPLETED
+
+**Goal:** Add a DATA_PREPARATION phase that decompresses data files on the NFS volume, scans for exact variant row counts, and supports remote chromosome extraction via tabix for chromosomes not in the data container (chr11+).
+
+**Why:** The data container (`hyperflowwms/1000genome-data:1.0`) only ships chr1-10. Workers fail with `FileNotFoundError` for chr11+ because no data preparation step existed. The Workflow Composer already generates download commands (tabix/curl) but the Conductor ignored them.
+
+**PR Breakdown:**
+
+**PR 2.12: DATA_PREPARATION Phase** (`feature/data-preparation`) → `v0.4.0-data-prep`
+- New phase: `phases/data_preparation.py` — decompress VCF files from data container, scan row counts, populate `state.chromosome_data`
+- Add `DATA_PREPARATION` to `PipelinePhase` enum (10-phase pipeline)
+- Move hf-run Helm install from DEPLOYMENT to PROVISIONING (conductor signal pattern)
+- Simplify deployment to just `kubectl cp` + touch `.conductor-ready`
+- Add `exec_in_pod` and `cp_to_pod` methods to `Kubectl`
+- Remove workflow-json ConfigMap mount (replaced by conductor signal pattern)
+- Add `data_container_chromosomes` config setting (chr1-10)
+- Demo prompt changed from chr22 to chr1
+
+**PR 2.13: Remote Tabix Extraction** (`feature/tabix-extraction`) → `v0.5.0-tabix`
+- Extract `download_commands` from Composer's `raw_plan.data_preparation.steps` in planning phase
+- Split data preparation into local (decompress chr1-10) and remote (K8s Job with `broadinstitute/gatk:4.4.0.0`) paths
+- Add `_filter_commands_for_chromosomes` and `_build_tabix_job` helpers
+- Dynamic NFS PVC sizing based on `estimated_data_size_gb`
+- Add `tabix_image` and `tabix_job_timeout` config settings
+- Add gatk image to Makefile `cluster-load-images`
+
+**Acceptance Criteria:**
+1. `make ci` passes (185+ unit tests, lint, typecheck)
+2. `make demo` (chr1) completes with data files decompressed and exact row counts
+3. Remote chromosomes (chr11+) trigger K8s Job with Composer-generated download commands
+4. `WorkflowPlan.download_commands` populated from Composer response
 
 ---
 
@@ -1638,6 +1819,254 @@ Stages 0-2 form the core product. Stages 3-5 make it production-worthy. Stages 6
 
 ---
 
+## 11b. PR Breakdown for Stage 2
+
+Stage 2 spans PRs #8–#24 across four sub-stages: core deferred generation (2.0), E2E validation (2.5), demo mode & hardening (2.5.1), and data preparation with remote extraction (2.6). Total: ~4,200 lines across 16 PRs.
+
+### PR 2.0: Namespace Fix ✅ MERGED → `v0.1.1-fix-namespace`
+**Branch:** `fix/namespace-creation` — PR #8
+
+**Contents:**
+- Fix `kubectl.create_namespace()` which only did `--dry-run=client` without piping to `kubectl apply`
+- Follows same two-step dry-run + apply pattern as `create_configmap_from_file()`
+- Added `/code-review:code-review` step to CLAUDE.md
+
+**Tests:** 98 unit tests pass
+**Review focus:** Subprocess correctness, dry-run + apply pattern
+**Size:** ~50 lines
+
+---
+
+### PR 2.1: Stage 2 Models ✅ MERGED → `v0.2.0-stage2-models`
+**Branch:** `feat/stage2-models` — PR #9
+
+**Contents:**
+- `src/workflow_conductor/models.py` — extend `PipelinePhase` enum from 6 to 9 phases: adds `PROVISIONING`, `GENERATION`, `APPROVAL`
+- Add `ChromosomeData` model (vcf_file, row_count, annotation_file, chromosome) for Composer's `generate_workflow` input
+- Add `RetryPolicy` model (max_retries, backoff_base, retryable_errors)
+- Add `chromosome_data: list[ChromosomeData]` field to `PipelineState`
+- Pure data-layer change — no behavioral changes
+
+**Tests:** 104 tests (98 existing + 6 new: enum count, ChromosomeData fields + JSON roundtrip, RetryPolicy defaults + custom)
+**Review focus:** Pydantic BaseModel patterns, phase ordering
+**Size:** ~100 lines
+
+---
+
+### PR 2.2: Structured Error Handling & Retry Logic ✅ MERGED → `v0.2.0-error-handling`
+**Branch:** `feat/stage2-error-handling` — PR #10
+
+**Contents:**
+- `src/workflow_conductor/retry.py` — `is_transient_error()` + `run_with_retry()` with exponential backoff
+- Handles: `KubectlError`, `HelmError`, `ClusterError`, `TimeoutError`, `ConnectionError`, `OSError`
+- Non-transient exceptions (ValueError, KeyError, etc.) raised immediately
+- Records retry attempts in `PipelineState.errors`
+
+**Tests:** 119 tests (104 existing + 15 new: transient/non-transient classification, success/retry/exhaust/immediate-raise/backoff-timing)
+**Review focus:** Error classification, backoff timing, opt-in design
+**Size:** ~270 lines
+
+---
+
+### PR 2.3: Provisioning Phase ✅ MERGED → `v0.2.0-provisioning`
+**Branch:** `feat/stage2-provisioning` — PR #11
+
+**Contents:**
+- `src/workflow_conductor/phases/provisioning.py` — extracts steps 0-5 from deployment:
+  - Kind cluster readiness, namespace creation, hf-ops install, ResourceQuota, data staging, infrastructure measurements
+- `src/workflow_conductor/k8s/kubectl.py` — add `get_nodes()` method (aggregates cluster capacity)
+- Populates `state.infrastructure`, `state.namespace`, `state.cluster_ready`
+
+**Tests:** 125 tests (119 existing + 5 provisioning + 1 kubectl)
+**Review focus:** Phase extraction from deployment, infrastructure measurement accuracy
+**Size:** ~390 lines
+
+---
+
+### PR 2.4: Generation Phase ✅ MERGED → `v0.2.0-generation`
+**Branch:** `feat/stage2-generation` — PR #12
+
+**Contents:**
+- `src/workflow_conductor/phases/generation.py` — calls Composer's `generate_workflow` MCP tool with real chromosome data
+- Context replay: uses `planner_history` + `synthesize_context_for_composer()` from planning phase
+- Robust JSON extraction: handles raw JSON, markdown code blocks, JSON embedded in text
+- Same Agent + AugmentedLLM pattern as planning phase
+
+**Tests:** 131 tests (125 existing + 6 new: workflow JSON production, chromosome data, context replay, non-JSON, unsupported provider, markdown extraction)
+**Review focus:** Context replay pattern, JSON extraction robustness, MCP tool call construction
+**Size:** ~370 lines
+
+---
+
+### PR 2.5: Approval Phase (Gate 2) ✅ MERGED → `v0.2.0-approval`
+**Branch:** `feat/stage2-approval` — PR #13
+
+**Contents:**
+- `src/workflow_conductor/phases/approval.py` — execution preview with real task counts, types, signals
+- `src/workflow_conductor/ui/display.py` — `display_execution_preview()` Rich panel with task breakdown by type prefix
+- `src/workflow_conductor/ui/prompts.py` — `prompt_execution_gate()` (approve/abort, no refine)
+
+**Tests:** 136 tests (131 existing + 5 new: auto-approve, user approve/abort, missing workflow_json guard, task count extraction)
+**Review focus:** Gate 2 vs Gate 1 UX, task count extraction from workflow JSON
+**Size:** ~230 lines
+
+---
+
+### PR 2.6: Pipeline Rewiring ✅ MERGED → `v0.2.0-pipeline-rewire`
+**Branch:** `feat/stage2-pipeline-rewire` — PR #14
+
+**Contents:**
+- `src/workflow_conductor/app.py` — 9-phase pipeline: ROUTING → PLANNING → VALIDATION → PROVISIONING → GENERATION → APPROVAL → DEPLOYMENT → MONITORING → COMPLETION
+- `src/workflow_conductor/phases/deployment.py` — slimmed: removed steps 0-5 (moved to provisioning), requires `state.namespace` + `state.cluster_ready`
+- `src/workflow_conductor/ui/display.py` — 9 numbered phase labels
+- `CLAUDE.md` — architecture diagram updated to 9-phase pipeline
+
+**Tests:** 144 tests (136 existing + 8 new: dry-run stops at Gate 1, Gate 1/2 abort, deployment guards, phase labels)
+**Review focus:** Phase ordering, deployment guards, Gate 2 abort flow
+**Size:** ~420 lines
+
+---
+
+### PR 2.7: Config Defaults & Test Fixtures ✅ MERGED → `v0.2.5-e2e-readiness`
+**Branch:** `fix/e2e-readiness` — PR #15
+
+**Contents:**
+- `local/kind-config-3n.yaml` — Kind config copied from hyperflow-k8s-deployment
+- Fix `config.py` defaults: Composer server command → Docker, chart paths
+- Fix E2E fixtures: `hyperflow_k8s_deployment_path`, Docker/LLM skip guards
+- Fix integration fixture: namespace collision (uuid suffix)
+- `Makefile` — `docker-pull-images` target, path guard on `infra-up`
+
+**Tests:** 144+ unit tests pass
+**Review focus:** Config defaults match real infrastructure, test isolation
+**Size:** ~90 lines
+
+---
+
+### PR 2.8: Integration Test Validation ✅ MERGED → `v0.2.5-integration-tests`
+**Branch:** `fix/integration-test-validation` — PR #16
+
+**Contents:**
+- Fix kr8s async generator API usage in integration tests
+- Requires: Docker + Kind cluster, no LLM tokens
+
+**Tests:** `make test-integration` passes (6 tests on Kind)
+**Review focus:** kr8s API compatibility
+**Size:** ~25 lines
+
+---
+
+### PR 2.9: E2E Test Validation ✅ MERGED → `v0.2.5-e2e-validated`
+**Branch:** `fix/e2e-test-validation` — PR #17
+
+**Contents:**
+- Fix `.env` loading for E2E tests
+- Isolate defaults tests from environment variable contamination
+- Requires: Docker + Kind + loaded images + LLM API key
+
+**Tests:** `make test-e2e` passes (dry-run + full pipeline)
+**Review focus:** .env isolation, test independence
+**Size:** ~30 lines
+
+---
+
+### PR 2.10: Full E2E Pipeline Fix ✅ MERGED → `v0.2.5-full-e2e`
+**Branch:** `fix/full-e2e-validation` — PR #18
+
+**Contents:**
+- `src/workflow_conductor/phases/planning.py` — extract structured data from Google Gemini's `function_call`/`function_response` history
+- `src/workflow_conductor/phases/generation.py` — skip redundant LLM call when planning already produced `workflow_json`
+- `src/workflow_conductor/k8s/values.py` — complete volumes/volumeMounts lists (Helm replaces, not merges), NFS PVC 10Gi
+- `src/workflow_conductor/phases/provisioning.py` — export Kind kubeconfig to temp file
+- `src/workflow_conductor/app.py` — pass model settings to mcp-agent Settings
+- `tests/e2e/conftest.py` — clean orphaned cluster-scoped K8s resources between runs
+- E2E test prompt: EUR/AFR chr22 (57 processes) instead of BRCA (118) for Docker VM limits
+
+**Tests:** 147 tests; full E2E: 9 phases, 52/52 jobs completed in 2.7 min
+**Review focus:** Gemini history extraction, Helm list replacement semantics, NFS sizing
+**Size:** ~500 lines
+
+---
+
+### PR 2.11: Tighten E2E Assertions ✅ MERGED → `v0.2.6-tight-e2e`
+**Branch:** `fix/tighten-e2e-assertions` — PR #19
+
+**Contents:**
+- Assert `status == COMPLETED` (not `COMPLETED|FAILED`)
+- Assert exactly 9 phase results (not `>= 7`)
+- Verify `workflow_plan` contains expected chromosome, `workflow_json` processes > 0
+- Verify `execution_summary.completed_tasks > 0` and `failed_tasks == 0`
+
+**Tests:** 147 tests + E2E: 52/52 jobs completed, 0 failed
+**Review focus:** Assertion strictness, false-pass prevention
+**Size:** ~25 lines
+
+---
+
+### PR 2.11a: Demo Mode ✅ MERGED → `v0.3.0-demo`
+**Branch:** `feature/demo-mode` — PR #20
+
+**Contents:**
+- `src/workflow_conductor/config.py` — `demo: bool = False`
+- `src/workflow_conductor/cli.py` — `--demo` flag
+- `src/workflow_conductor/app.py` — demo hooks (explanation panels + pause) around each phase
+- `src/workflow_conductor/ui/display.py` — `display_phase_explanation()`, `display_workflow_json_summary()`, `demo_pause()`
+- `src/workflow_conductor/phases/completion.py` — skip teardown in demo mode
+- `Makefile` — `demo` target
+
+**Tests:** 158 tests (147 existing + 8 new: explanations, summary, pause, banner, CLI flag)
+**Review focus:** Non-intrusive demo hooks, demo vs normal mode isolation
+**Size:** ~280 lines
+
+---
+
+### Direct commits: Hardening (no PR)
+Pushed directly to main between PRs #20 and #22:
+- `02eba81` Add `max_workflow_processes` guardrail to reject oversized workflows (config + validation phase)
+- `5573334` Add cleanup of previous hf-run releases at start and teardown at end of demo
+- `edfb249` Show workflow.json size, chromosomes in execution preview panel
+- `ed2f5d9` Include hf-run cluster-scoped resources (ClusterRole, ClusterRoleBinding, StorageClass) in cleanup
+
+---
+
+### PR 2.12: DATA_PREPARATION Phase ✅ MERGED → `v0.4.0-data-prep`
+**Branch:** `feature/data-preparation` — PR #22
+
+**Contents:**
+- `src/workflow_conductor/phases/data_preparation.py` — new phase: decompress VCF files from data container, scan row counts, populate `state.chromosome_data`
+- `src/workflow_conductor/models.py` — add `DATA_PREPARATION` to `PipelinePhase` enum (10-phase pipeline)
+- `src/workflow_conductor/phases/provisioning.py` — move hf-run Helm install here (conductor signal pattern)
+- `src/workflow_conductor/phases/deployment.py` — slim to `kubectl cp` + touch `.conductor-ready`
+- `src/workflow_conductor/k8s/kubectl.py` — add `exec_in_pod()` and `cp_to_pod()` methods
+- `src/workflow_conductor/k8s/values.py` — remove workflow-json ConfigMap mount
+- `src/workflow_conductor/config.py` — add `data_container_chromosomes` (chr1-10)
+
+**Tests:** 175 tests (158 existing + 17 new: decompress flow, row count scan, missing chromosome error, data_preparation models)
+**Review focus:** Conductor signal pattern, exec_in_pod safety, 10-phase ordering
+**Size:** ~800 lines
+
+**Note:** PR #21 (`fix/workflow-json-overwrite`) originally introduced the conductor signal pattern but was superseded by this PR. PR #21 remains open/stale.
+
+---
+
+### PR 2.13: Remote Tabix Extraction ✅ MERGED → `v0.5.0-tabix`
+**Branch:** `feature/tabix-extraction` — PR #24
+
+**Contents:**
+- `src/workflow_conductor/phases/planning.py` — extract `download_commands` from Composer's `raw_plan.data_preparation.steps`
+- `src/workflow_conductor/phases/data_preparation.py` — split local (decompress chr1-10) / remote (K8s Job with `broadinstitute/gatk:4.4.0.0`) paths; `_filter_commands_for_chromosomes()`, `_build_tabix_job()` helpers
+- `src/workflow_conductor/k8s/values.py` — `_nfs_storage_size()` dynamic NFS PVC sizing based on `estimated_data_size_gb`
+- `src/workflow_conductor/config.py` — `tabix_image`, `tabix_job_timeout` settings
+- `Makefile` — add gatk image to `cluster-load-images` + `docker-pull-images`
+
+**Tests:** 185 tests (175 existing + 10 new: tabix job creation, mixed local/remote, command filtering, job manifest, NFS scaling)
+**Review focus:** K8s Job manifest correctness, command filtering (chr1 vs chr11), NFS sizing formula
+**Size:** ~600 lines
+
+**Note:** PR #23 was closed (auto-closed when its base branch was deleted) and recreated as PR #24.
+
+---
+
 ## 12. Verification Plan
 
 ### Per-PR Verification
@@ -1744,7 +2173,7 @@ make setup            # Full setup from scratch (install + cluster + infra)
 - `make cluster-status` — Check K8s cluster health
 
 ## Architecture
-6-phase MVP pipeline: Route -> Plan -> Validate -> Deploy -> Monitor -> Complete
+10-phase pipeline: Route -> Plan -> Validate -> Provision -> DataPrep -> Generate -> Approve -> Deploy -> Monitor -> Complete
 
 ## Key Files
 - `devbox.json` — Pinned dev tools (kind, helm, kubectl, uv, python)
@@ -1760,7 +2189,7 @@ make setup            # Full setup from scratch (install + cluster + infra)
 - Data models: Pydantic BaseModel (not dataclass)
 - K8s testing: Kind primary
 - K8s client: subprocess (MVP) -> kagent (Stage 6)
-- Workflow delivery: ConfigMap mount
+- Workflow delivery: Conductor signal pattern (kubectl cp + .conductor-ready)
 - Config: pydantic-settings with HF_CONDUCTOR_ prefix
 ```
 
