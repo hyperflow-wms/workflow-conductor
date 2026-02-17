@@ -46,7 +46,8 @@ class TestDataPreparationPhase:
             kubectl.exec_in_pod = AsyncMock(
                 side_effect=[
                     "",  # decompress command
-                    "1:5000\n2:6000",  # scan command
+                    "1:5000:ALL.chr1.250000.vcf:ALL.chr1.ann.vcf\n"
+                    "2:6000:ALL.chr2.250000.vcf:ALL.chr2.ann.vcf",  # scan
                 ]
             )
 
@@ -72,7 +73,8 @@ class TestDataPreparationPhase:
             kubectl.exec_in_pod = AsyncMock(
                 side_effect=[
                     "",  # decompress
-                    "1:12345\n2:67890",  # scan
+                    "1:12345:ALL.chr1.250000.vcf:ALL.chr1.ann.vcf\n"
+                    "2:67890:ALL.chr2.250000.vcf:ALL.chr2.ann.vcf",  # scan
                 ]
             )
 
@@ -152,7 +154,9 @@ class TestRemoteExtraction:
             kubectl = MockKubectl.return_value
             kubectl.apply_json = AsyncMock(return_value="job created")
             kubectl.wait_for_job = AsyncMock(return_value="")
-            kubectl.exec_in_pod = AsyncMock(return_value="11:9999")
+            kubectl.exec_in_pod = AsyncMock(
+                return_value="11:9999:ALL.chr11.250000.vcf:ALL.chr11.ann.vcf"
+            )
 
             result = await run_data_preparation_phase(state, settings)
 
@@ -204,7 +208,8 @@ class TestRemoteExtraction:
             kubectl.exec_in_pod = AsyncMock(
                 side_effect=[
                     "",  # decompress (local)
-                    "1:5000\n11:8000",  # scan (all)
+                    "1:5000:ALL.chr1.250000.vcf:ALL.chr1.ann.vcf\n"
+                    "11:8000:ALL.chr11.250000.vcf:ALL.chr11.ann.vcf",  # scan (all)
                 ]
             )
             kubectl.apply_json = AsyncMock(return_value="job created")

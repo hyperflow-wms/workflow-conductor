@@ -29,7 +29,7 @@ class WorkflowSettings(BaseSettings):
             "run",
             "--rm",
             "-i",
-            "hyperflowwms/1000genome-mcp:2.1",
+            "hyperflowwms/1000genome-mcp:2.3",
             "python",
             "-m",
             "workflow_composer.mcp_server",
