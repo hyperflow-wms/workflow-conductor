@@ -167,6 +167,79 @@ class TestDeleteNamespace:
             assert "--wait=false" in call_args
 
 
+class TestCleanupPreviousRuns:
+    @pytest.mark.asyncio
+    async def test_deletes_released_pvs(self, kubectl: Kubectl) -> None:
+        procs = [
+            _mock_proc("pvc-aaa pvc-bbb"),  # get pv (Released)
+            _mock_proc(),  # delete pv pvc-aaa
+            _mock_proc(),  # delete pv pvc-bbb
+            _mock_proc(""),  # get namespaces
+            _mock_proc(""),  # get Terminating namespaces
+            *[_mock_proc() for _ in range(6)],  # 6 cluster resources
+        ]
+        with patch("asyncio.create_subprocess_exec", side_effect=procs) as mock_exec:
+            await kubectl.cleanup_previous_runs("wf-1000g")
+            calls = [c[0] for c in mock_exec.call_args_list]
+            # Second and third calls should delete the released PVs
+            assert "pvc-aaa" in calls[1]
+            assert "pvc-bbb" in calls[2]
+
+    @pytest.mark.asyncio
+    async def test_skips_current_namespace(self, kubectl: Kubectl) -> None:
+        procs = [
+            _mock_proc(""),  # get pv (Released)
+            _mock_proc("wf-1000g-old wf-1000g-current"),  # namespaces
+            _mock_proc(),  # delete old ns
+            _mock_proc(""),  # get Terminating namespaces
+            *[_mock_proc() for _ in range(6)],  # cluster resources
+        ]
+        with patch("asyncio.create_subprocess_exec", side_effect=procs) as mock_exec:
+            await kubectl.cleanup_previous_runs(
+                "wf-1000g", current_namespace="wf-1000g-current"
+            )
+            all_args = [" ".join(c[0]) for c in mock_exec.call_args_list]
+            deleted_ns = [a for a in all_args if "delete namespace" in a]
+            assert len(deleted_ns) == 1
+            assert "wf-1000g-old" in deleted_ns[0]
+
+    @pytest.mark.asyncio
+    async def test_force_removes_terminating_namespaces(self, kubectl: Kubectl) -> None:
+        procs = [
+            _mock_proc(""),  # get pv (Released)
+            _mock_proc(""),  # get namespaces (none active)
+            _mock_proc("wf-1000g-stuck"),  # get Terminating
+            _mock_proc(),  # patch ns
+            *[_mock_proc() for _ in range(6)],  # cluster resources
+        ]
+        with patch("asyncio.create_subprocess_exec", side_effect=procs) as mock_exec:
+            await kubectl.cleanup_previous_runs("wf-1000g")
+            calls = [c[0] for c in mock_exec.call_args_list]
+            patch_call = calls[3]
+            assert "patch" in patch_call
+            assert "wf-1000g-stuck" in patch_call
+            assert "finalizers" in " ".join(patch_call)
+
+    @pytest.mark.asyncio
+    async def test_deletes_all_cluster_scoped_resources(self, kubectl: Kubectl) -> None:
+        procs = [
+            _mock_proc(""),  # get pv
+            _mock_proc(""),  # get namespaces
+            _mock_proc(""),  # get Terminating
+            *[_mock_proc() for _ in range(6)],  # 6 cluster resources
+        ]
+        with patch("asyncio.create_subprocess_exec", side_effect=procs) as mock_exec:
+            await kubectl.cleanup_previous_runs("wf-1000g")
+            all_args = [" ".join(c[0]) for c in mock_exec.call_args_list]
+            resource_deletes = [a for a in all_args if "--ignore-not-found" in a]
+            # Should delete 6 cluster-scoped resources
+            assert len(resource_deletes) == 6
+            resources = " ".join(resource_deletes)
+            assert "storageclass/nfs" in resources
+            assert "clusterrole/hf-ops-nfs-server-provisioner" in resources
+            assert "hyperflow-worker-pool-operator" in resources
+
+
 class TestLogs:
     @pytest.mark.asyncio
     async def test_logs_with_container(self, kubectl: Kubectl) -> None:
