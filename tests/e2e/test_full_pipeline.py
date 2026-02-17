@@ -53,19 +53,19 @@ class TestFullPipeline:
         """
         state = await run_pipeline(
             "Do European and African populations show different patterns "
-            "of shared deleterious mutations on chromosome 22? This is "
+            "of shared deleterious mutations on chromosome 1? This is "
             "relevant for understanding population-specific disease risks.",
             e2e_settings,
             auto_approve=True,
         )
 
-        # All 9 phases must complete successfully
+        # All 10 phases must complete successfully
         assert state.status == PipelineStatus.COMPLETED
-        assert len(state.phase_results) == 9
+        assert len(state.phase_results) == 10
 
         # Workflow plan should reflect the prompt
         assert state.workflow_plan is not None
-        assert "22" in state.workflow_plan.chromosomes
+        assert "1" in state.workflow_plan.chromosomes
 
         # Workflow JSON must have been generated
         assert state.workflow_json is not None

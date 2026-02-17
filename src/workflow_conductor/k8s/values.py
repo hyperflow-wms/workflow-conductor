@@ -17,19 +17,46 @@ def generate_helm_values(
 ) -> dict[str, Any]:
     """Generate Helm values dict for the hyperflow-run chart.
 
-    Includes image overrides, workflow ConfigMap mount, and optional
-    resource profiles from the Workflow Profiler.
+    Includes image overrides and optional resource profiles from the
+    Workflow Profiler.
 
     The volumes/volumeMounts lists must be COMPLETE because Helm replaces
-    (not merges) list values.  We include the chart defaults alongside
-    our workflow-json ConfigMap addition.
+    (not merges) list values.  We include the chart defaults here.
+
+    Workflow.json is delivered via kubectl cp (conductor signal pattern),
+    not via ConfigMap mount.
     """
+    # Custom engine command: wait for conductor to signal readiness
+    # before running hflow. This prevents the engine from running the
+    # default workflow.json shipped by the data image before the
+    # conductor can overwrite it with the generated one.
+    engine_command = [
+        "/bin/sh",
+        "-c",
+        (
+            "echo 'Waiting for conductor signal...' ; "
+            "while ! [ -f /work_dir/.conductor-ready ]; do sleep 2 ; done ; "
+            "echo 'Conductor signal received.' ; "
+            "cd /work_dir ; "
+            "mkdir -p /work_dir/logs-hf ; "
+            "echo 'Running workflow:' ; "
+            "hflow run workflow.json ; "
+            'if [ "$(ls -A /work_dir/logs-hf)" ]; then '
+            "  echo 1 > /work_dir/postprocStart ; "
+            "else "
+            "  echo 'HyperFlow logs not collected.' ; "
+            "fi ; "
+            "echo 'Workflow finished.' ; "
+            "while true; do sleep 5 ; done"
+        ),
+    ]
+
     values: dict[str, Any] = {
         "hyperflow-engine": {
             "containers": {
                 "hyperflow": {
                     "image": settings.hf_engine_image,
-                    "autoRun": True,
+                    "command": engine_command,
                     "volumeMounts": [
                         # Chart defaults
                         {"name": "workflow-data", "mountPath": "/work_dir"},
@@ -47,20 +74,13 @@ def generate_helm_values(
                             "subPath": "workflow.config.executionModels.json",
                             "readOnly": True,
                         },
-                        # Conductor addition: workflow.json from ConfigMap
-                        {
-                            "name": "workflow-json",
-                            "mountPath": "/work_dir/workflow.json",
-                            "subPath": "workflow.json",
-                            "readOnly": True,
-                        },
                     ],
                 },
                 "worker": {
                     "image": settings.worker_image,
                 },
             },
-            # Complete volumes list (chart defaults + our addition)
+            # Complete volumes list (chart defaults only)
             "volumes": [
                 {
                     "name": "config-map",
@@ -73,10 +93,6 @@ def generate_helm_values(
                 {
                     "name": "worker-config",
                     "configMap": {"name": "worker-config"},
-                },
-                {
-                    "name": "workflow-json",
-                    "configMap": {"name": "workflow-json"},
                 },
             ],
         },

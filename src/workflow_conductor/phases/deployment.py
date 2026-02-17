@@ -1,10 +1,10 @@
-"""Phase 7: Deployment — deploy workflow on pre-provisioned K8s infrastructure.
+"""Phase 8: Deployment — deliver workflow.json and signal engine to start.
 
-After provisioning (steps 0-5) and generation (workflow.json), deployment:
-- Cleans previous hf-run release
-- Creates workflow.json ConfigMap
-- Installs hf-run chart
-- Waits for engine pod readiness
+After provisioning (hf-ops + hf-run), data preparation, and generation
+(workflow.json), deployment:
+- Writes workflow.json to a temp file
+- Copies it to the engine pod via kubectl cp
+- Signals the engine to start by touching .conductor-ready
 """
 
 from __future__ import annotations
@@ -12,10 +12,9 @@ from __future__ import annotations
 import json
 import logging
 import tempfile
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from workflow_conductor.k8s import Helm, Kubectl, generate_helm_values
+from workflow_conductor.k8s import Kubectl
 from workflow_conductor.models import PipelinePhase, PipelineState
 from workflow_conductor.ui.display import display_phase_header
 
@@ -29,9 +28,10 @@ async def run_deployment_phase(
     state: PipelineState,
     settings: ConductorSettings,
 ) -> PipelineState:
-    """Deploy the workflow on pre-provisioned K8s infrastructure.
+    """Deliver workflow.json and signal the engine to start.
 
     Requires state.namespace and state.cluster_ready from provisioning.
+    Requires state.engine_pod_name from provisioning.
     Requires state.workflow_json from generation.
     """
     display_phase_header(PipelinePhase.DEPLOYMENT)
@@ -44,86 +44,43 @@ async def run_deployment_phase(
         raise ValueError(
             "Cannot deploy: cluster not ready (provisioning phase required)"
         )
+    if not state.engine_pod_name:
+        raise ValueError(
+            "Cannot deploy: engine pod not set (provisioning phase required)"
+        )
 
     namespace = state.namespace
     kubectl = Kubectl(kubeconfig=settings.kubernetes.kubeconfig)
-    helm = Helm(kubeconfig=settings.kubernetes.kubeconfig)
-    charts_path = settings.hyperflow_k8s_deployment_path
 
-    # Step 1: Clean up previous hf-run
-    logger.info("Step 1: Cleaning up previous hf-run")
-    if await helm.release_exists("hf-run", namespace=namespace):
-        await helm.uninstall("hf-run", namespace=namespace)
-        await kubectl.wait_for_delete(
-            "pod",
-            namespace=namespace,
-            label_selector="component=hyperflow-engine",
-            timeout=60,
-        )
-
-    # Step 2: Inject workflow.json via ConfigMap
-    logger.info("Step 2: Creating workflow.json ConfigMap")
+    # Step 1: Write workflow.json to temp file and copy to engine pod
     if state.workflow_json:
+        logger.info("Step 1: Delivering workflow.json to engine pod")
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".json",
             delete=False,
         ) as f:
             json.dump(state.workflow_json, f)
-            workflow_path = f.name
-        state.workflow_json_path = workflow_path
+            state.workflow_json_path = f.name
 
-        await kubectl.create_configmap_from_file(
-            "workflow-json",
-            workflow_path,
+        await kubectl.cp_to_pod(
+            state.workflow_json_path,
+            state.engine_pod_name,
+            "/work_dir/workflow.json",
             namespace=namespace,
-            file_key="workflow.json",
+            container="hyperflow",
         )
 
-    # Step 3: Install hf-run
-    logger.info("Step 3: Installing hf-run")
-    run_chart = str(Path(charts_path) / "charts" / "hyperflow-run")
-    values = generate_helm_values(
-        settings,
-        state.workflow_plan,  # type: ignore[arg-type]
+    # Step 2: Signal engine to start
+    logger.info("Step 2: Signaling engine to start")
+    await kubectl.exec_in_pod(
+        state.engine_pod_name,
+        ["touch", "/work_dir/.conductor-ready"],
         namespace=namespace,
-        resource_profiles=state.resource_profiles or None,
+        container="hyperflow",
     )
 
-    # Write generated values to temp file
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        suffix=".yaml",
-        delete=False,
-    ) as f:
-        import yaml
-
-        yaml.dump(values, f)
-        generated_values_path = f.name
-
-    values_files = [generated_values_path]
-    if settings.helm.run_values:
-        values_files.insert(0, settings.helm.run_values)
-
-    await helm.upgrade_install(
-        "hf-run",
-        run_chart,
-        namespace=namespace,
-        values_files=values_files,
-        dependency_update=True,
-        wait=True,
-        timeout=settings.helm.timeout_run,
-    )
     state.helm_release_name = "hf-run"
-
-    # Step 4: Wait for engine pod
-    logger.info("Step 4: Waiting for engine pod readiness")
-    pod_name = await kubectl.wait_for_pod(
-        namespace=namespace,
-        label_selector="component=hyperflow-engine",
-        timeout=300,
-    )
-    state.engine_pod_name = pod_name
-    logger.info("Engine pod ready: %s", pod_name)
+    logger.info("Deployment complete — engine signaled to start")
 
     return state

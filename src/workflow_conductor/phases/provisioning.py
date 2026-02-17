@@ -1,17 +1,21 @@
 """Provisioning phase: infrastructure setup, data staging, and measurements.
 
-Extracts steps 0-5 from the original deployment phase and adds
-infrastructure measurement queries (node count, vCPUs, memory).
+Sets up Kind cluster, installs hf-ops and hf-run Helm charts, waits for
+engine pod and nfs-data job, and queries infrastructure measurements.
 """
 
 from __future__ import annotations
 
 import logging
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
+
 from workflow_conductor.k8s import Helm, KindCluster, Kubectl
+from workflow_conductor.k8s.values import generate_helm_values
 from workflow_conductor.models import (
     InfrastructureMeasurements,
     PipelinePhase,
@@ -36,10 +40,10 @@ async def run_provisioning_phase(
     1. Create namespace with timestamp suffix
     2. Install hf-ops (NFS provisioner, RabbitMQ, KEDA)
     3. Create ResourceQuota
-    4. Query cluster for infrastructure measurements
-
-    Note: Data staging (nfs-data) is handled by the hf-run chart as a
-    sub-chart dependency, not as a separate install. See deployment phase.
+    4. Install hf-run (engine waits for conductor signal)
+    5. Wait for engine pod readiness
+    6. Wait for nfs-data job (data container staging)
+    7. Query cluster for infrastructure measurements
     """
     display_phase_header(PipelinePhase.PROVISIONING)
 
@@ -102,8 +106,50 @@ async def run_provisioning_phase(
         hard_memory=settings.resource_quota_memory,
     )
 
-    # Step 4: Query infrastructure measurements
-    logger.info("Step 4: Querying infrastructure measurements")
+    # Step 4: Install hf-run (engine waits for conductor signal)
+    logger.info("Step 4: Installing hf-run")
+    run_chart = str(Path(charts_path) / "charts" / "hyperflow-run")
+    values = generate_helm_values(
+        settings,
+        state.workflow_plan,  # type: ignore[arg-type]
+        namespace=namespace,
+        resource_profiles=state.resource_profiles or None,
+    )
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump(values, f)
+        generated_values_path = f.name
+
+    values_files = [generated_values_path]
+    if settings.helm.run_values:
+        values_files.insert(0, settings.helm.run_values)
+
+    await helm.upgrade_install(
+        "hf-run",
+        run_chart,
+        namespace=namespace,
+        values_files=values_files,
+        dependency_update=True,
+        wait=True,
+        timeout=settings.helm.timeout_run,
+    )
+    state.helm_release_name = "hf-run"
+
+    # Step 5: Wait for engine pod
+    logger.info("Step 5: Waiting for engine pod readiness")
+    pod_name = await kubectl.wait_for_pod(
+        namespace=namespace,
+        label_selector="component=hyperflow-engine",
+        timeout=300,
+    )
+    state.engine_pod_name = pod_name
+    logger.info("Engine pod ready: %s", pod_name)
+
+    # Step 6: Wait for nfs-data job (data container staging)
+    logger.info("Step 6: Waiting for nfs-data job to complete")
+    await kubectl.wait_for_job("nfs-data", namespace=namespace, timeout=300)
+
+    # Step 7: Query infrastructure measurements
+    logger.info("Step 7: Querying infrastructure measurements")
     node_info = await kubectl.get_nodes()
     state.infrastructure = InfrastructureMeasurements(
         namespace=namespace,

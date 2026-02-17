@@ -2,6 +2,7 @@
 
 from workflow_conductor.phases.approval import run_approval_phase
 from workflow_conductor.phases.completion import run_completion_phase
+from workflow_conductor.phases.data_preparation import run_data_preparation_phase
 from workflow_conductor.phases.deployment import run_deployment_phase
 from workflow_conductor.phases.generation import run_generation_phase
 from workflow_conductor.phases.monitoring import run_monitoring_phase
@@ -13,6 +14,7 @@ from workflow_conductor.phases.validation import run_validation_phase
 __all__ = [
     "run_approval_phase",
     "run_completion_phase",
+    "run_data_preparation_phase",
     "run_deployment_phase",
     "run_generation_phase",
     "run_monitoring_phase",

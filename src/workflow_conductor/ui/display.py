@@ -44,11 +44,12 @@ def display_phase_header(phase: PipelinePhase) -> None:
         PipelinePhase.PLANNING: "Phase 2: Planning",
         PipelinePhase.VALIDATION: "Phase 3: Validation (Gate 1)",
         PipelinePhase.PROVISIONING: "Phase 4: Provisioning",
-        PipelinePhase.GENERATION: "Phase 5: Generation",
-        PipelinePhase.APPROVAL: "Phase 6: Approval (Gate 2)",
-        PipelinePhase.DEPLOYMENT: "Phase 7: Deployment",
-        PipelinePhase.MONITORING: "Phase 8: Monitoring",
-        PipelinePhase.COMPLETION: "Phase 9: Completion",
+        PipelinePhase.DATA_PREPARATION: "Phase 5: Data Preparation",
+        PipelinePhase.GENERATION: "Phase 6: Generation",
+        PipelinePhase.APPROVAL: "Phase 7: Approval (Gate 2)",
+        PipelinePhase.DEPLOYMENT: "Phase 8: Deployment",
+        PipelinePhase.MONITORING: "Phase 9: Monitoring",
+        PipelinePhase.COMPLETION: "Phase 10: Completion",
     }
     label = labels.get(phase, phase.value)
     console.rule(f"[bold blue]{label}[/bold blue]")
@@ -196,7 +197,13 @@ _PHASE_EXPLANATIONS: dict[PipelinePhase, str] = {
     ),
     PipelinePhase.PROVISIONING: (
         "Sets up Kubernetes infrastructure: creates namespace, deploys "
-        "hf-ops (NFS server, Redis), waits for data staging to complete."
+        "hf-ops (NFS server, Redis), installs hf-run (engine + workers), "
+        "and waits for data container staging to complete."
+    ),
+    PipelinePhase.DATA_PREPARATION: (
+        "Decompresses and stages data files on the NFS volume. "
+        "Scans VCF files for exact variant row counts to feed "
+        "into the workflow generator for precise parallelism."
     ),
     PipelinePhase.GENERATION: (
         "The LLM calls the Workflow Composer to generate the full "
@@ -209,9 +216,9 @@ _PHASE_EXPLANATIONS: dict[PipelinePhase, str] = {
         "automatically."
     ),
     PipelinePhase.DEPLOYMENT: (
-        "Deploys the workflow to Kubernetes: creates the workflow.json "
-        "ConfigMap, installs the hf-run Helm chart (HyperFlow engine + "
-        "workers)."
+        "Delivers the generated workflow.json to the engine pod via "
+        "kubectl cp and signals the engine to start by touching "
+        ".conductor-ready."
     ),
     PipelinePhase.MONITORING: (
         "Polls Kubernetes for job completion status. Tracks completed "

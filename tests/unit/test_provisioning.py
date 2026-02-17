@@ -37,6 +37,8 @@ def _mock_kubectl() -> MagicMock:
     kubectl.create_namespace = AsyncMock(return_value="namespace/wf-test created")
     kubectl.create_resource_quota = AsyncMock(return_value="")
     kubectl.cleanup_previous_runs = AsyncMock()
+    kubectl.wait_for_pod = AsyncMock(return_value="engine-pod-123")
+    kubectl.wait_for_job = AsyncMock()
     kubectl.get_nodes = AsyncMock(
         return_value={
             "node_count": 2,
@@ -198,5 +200,31 @@ class TestProvisioningPhase:
             )
 
             await run_provisioning_phase(state_after_validation, settings)
-        # Only hf-ops is installed in provisioning (data staging is part of hf-run)
-        assert helm.upgrade_install.await_count == 1
+        # hf-ops and hf-run are both installed in provisioning
+        assert helm.upgrade_install.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_sets_engine_pod_name(
+        self, state_after_validation: PipelineState, settings: ConductorSettings
+    ) -> None:
+        with (
+            patch(
+                "workflow_conductor.phases.provisioning.Kubectl",
+                return_value=_mock_kubectl(),
+            ),
+            patch(
+                "workflow_conductor.phases.provisioning.Helm",
+                return_value=_mock_helm(),
+            ),
+            patch(
+                "workflow_conductor.phases.provisioning.KindCluster",
+                return_value=_mock_kind_cluster(),
+            ),
+        ):
+            from workflow_conductor.phases.provisioning import (
+                run_provisioning_phase,
+            )
+
+            result = await run_provisioning_phase(state_after_validation, settings)
+        assert result.engine_pod_name == "engine-pod-123"
+        assert result.helm_release_name == "hf-run"

@@ -75,9 +75,11 @@ class TestRunPipeline:
 
     @pytest.mark.asyncio
     async def test_abort_at_gate2_stops_pipeline(self) -> None:
-        """After provisioning+generation, user aborts at Gate 2."""
+        """After provisioning+data prep+generation, user aborts at Gate 2."""
         mock_llm = AsyncMock()
-        mock_llm.generate_str.return_value = '{"description": "test"}'
+        mock_llm.generate_str.return_value = (
+            '{"description": "test", "chromosomes": ["1"]}'
+        )
         history_mock = MagicMock()
         history_mock.get.return_value = []
         mock_llm.history = history_mock
@@ -115,12 +117,16 @@ class TestRunPipeline:
                 "workflow_conductor.phases.approval.prompt_execution_gate",
                 return_value=UserResponse(action="abort"),
             ),
+            patch(
+                "workflow_conductor.phases.data_preparation.Kubectl"
+            ) as MockDataPrepKubectl,
         ):
             # Set up provisioning mocks
             kubectl = MockKubectl.return_value
             kubectl.create_namespace = AsyncMock()
             kubectl.create_resource_quota = AsyncMock()
             kubectl.cleanup_previous_runs = AsyncMock()
+            kubectl.wait_for_pod = AsyncMock(return_value="engine-pod-123")
             kubectl.wait_for_job = AsyncMock()
             kubectl.get_nodes = AsyncMock(
                 return_value={
@@ -139,6 +145,10 @@ class TestRunPipeline:
             kind.use_context = AsyncMock()
             kind.export_kubeconfig = AsyncMock(return_value="/tmp/mock-kubeconfig.yaml")
 
+            # Set up data preparation mocks
+            data_prep_kubectl = MockDataPrepKubectl.return_value
+            data_prep_kubectl.exec_in_pod = AsyncMock(side_effect=["", "1:5000"])
+
             state = await run_pipeline(
                 "test prompt",
                 ConductorSettings(),
@@ -148,11 +158,12 @@ class TestRunPipeline:
         assert state.status == PipelineStatus.ABORTED
         assert state.user_approved_plan is True
         assert state.user_approved_execution is False
-        # Deployment should NOT have run
-        assert state.helm_release_name == ""
+        # Provisioning ran (sets helm_release_name) but deployment did not
+        assert state.helm_release_name == "hf-run"
+        assert state.workflow_json_path == ""
 
     @pytest.mark.asyncio
-    async def test_nine_phase_labels_in_results(self) -> None:
+    async def test_ten_phase_labels_in_results(self) -> None:
         """Dry run records phases 1-3 in phase_results."""
         mock_llm = AsyncMock()
         mock_llm.generate_str.return_value = '{"description": "test"}'

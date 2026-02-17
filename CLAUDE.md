@@ -55,20 +55,20 @@ make teardown-all         # Full cleanup (cluster + releases)
 
 ## Architecture
 
-9-phase pipeline (Stage 2):
+10-phase pipeline (Stage 2):
 
 ```
-NL Prompt → ROUTING → PLANNING → VALIDATION (Gate 1) → PROVISIONING → GENERATION
-              │          │           │                      │              │
-           hardcoded   Composer    Rich UI              Kind+Helm      Composer
-           to 1000g    MCP tools   approve/             infra setup    MCP tool
-                       via Agent   refine/abort         + data stage   workflow.json
+NL Prompt → ROUTING → PLANNING → VALIDATION (Gate 1) → PROVISIONING → DATA_PREPARATION
+              │          │           │                      │                  │
+           hardcoded   Composer    Rich UI              Kind+Helm          decompress
+           to 1000g    MCP tools   approve/             hf-ops+hf-run     scan VCF
+                       via Agent   refine/abort         wait engine+data  row counts
 
-         → APPROVAL (Gate 2) → DEPLOYMENT → MONITORING → COMPLETION
-              │                    │            │            │
-           Rich UI              ConfigMap     poll K8s    teardown+
-           approve/abort        + hf-run      job status  summary
-           real task counts     Helm install
+         → GENERATION → APPROVAL (Gate 2) → DEPLOYMENT → MONITORING → COMPLETION
+              │              │                    │            │            │
+           Composer       Rich UI              kubectl cp   poll K8s    teardown+
+           MCP tool       approve/abort        + signal     job status  summary
+           workflow.json  real task counts     engine
 ```
 
 ### Key Patterns
@@ -78,7 +78,7 @@ NL Prompt → ROUTING → PLANNING → VALIDATION (Gate 1) → PROVISIONING → 
 - **Context replay**: `planner_history` serialized in state enables conversation history to cross Temporal activity boundaries
 - **Context synthesis**: `synthesize_context_for_composer()` builds coherent context for stateless Composer calls during refinement loops
 - **K8s via subprocess**: Async wrappers around helm/kubectl (not Python K8s client); mirrors `fast-test.sh` flow
-- **ConfigMap workflow delivery**: workflow.json injected via ConfigMap mount (not kubectl cp)
+- **Conductor signal pattern**: Engine command waits for `/work_dir/.conductor-ready`; conductor copies workflow.json via `kubectl cp` then touches the signal file
 - **LLM factory**: `{"anthropic": AnthropicAugmentedLLM, "google": GoogleAugmentedLLM}` — provider switchable via config
 
 ### External Components
@@ -98,7 +98,7 @@ NL Prompt → ROUTING → PLANNING → VALIDATION (Gate 1) → PROVISIONING → 
 - **All timestamps**: `datetime.now(UTC)` (not naive datetimes)
 - **K8s ops**: subprocess helm/kubectl for MVP; kagent-tool-server in Stage 6
 - **K8s testing**: Kind primary, kr8s for async test assertions
-- **Workflow delivery**: ConfigMap mount (not kubectl cp)
+- **Workflow delivery**: Conductor signal pattern — `kubectl cp` + touch `.conductor-ready` (engine waits for signal before running)
 - **Config**: pydantic-settings with `HF_CONDUCTOR_` prefix, `__` nested delimiter
 - **CLI**: Click + Rich
 - **Package layout**: `src/workflow_conductor/` with `phases/`, `k8s/`, `ui/` subpackages

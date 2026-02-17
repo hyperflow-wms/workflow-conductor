@@ -71,7 +71,7 @@ class TestDisplayPhaseHeader:
         output = _capture_output(display_phase_header, PipelinePhase.APPROVAL)
         assert "Approval" in output
 
-    def test_all_nine_phases_have_labels(self) -> None:
+    def test_all_ten_phases_have_labels(self) -> None:
         """Every PipelinePhase should have a numbered label."""
         for phase in PipelinePhase:
             output = _capture_output(display_phase_header, phase)

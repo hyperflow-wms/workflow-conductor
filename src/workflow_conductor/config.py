@@ -86,5 +86,8 @@ class ConductorSettings(BaseSettings):
     demo: bool = False
     log_level: str = "INFO"
     max_workflow_processes: int = 200
+    data_container_chromosomes: list[str] = Field(
+        default_factory=lambda: [str(i) for i in range(1, 11)]
+    )
     monitor_poll_interval: int = 10
     monitor_timeout: int = 3600
