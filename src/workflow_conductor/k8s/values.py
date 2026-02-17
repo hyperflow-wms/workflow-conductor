@@ -140,8 +140,6 @@ spec:
       nodeSelector:
         hyperflow-wms/nodepool: hfmaster
       volumes:
-      - name: workflow-data
-        emptyDir: {}
       - name: my-pvc-nfs
         persistentVolumeClaim:
           claimName: nfs"""
