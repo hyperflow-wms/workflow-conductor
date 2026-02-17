@@ -29,9 +29,10 @@ class Kubectl:
         check: bool = True,
     ) -> str:
         """Run a kubectl command and return stdout."""
-        cmd = ["kubectl", *args]
+        cmd = ["kubectl"]
         if self.kubeconfig:
             cmd.extend(["--kubeconfig", self.kubeconfig])
+        cmd.extend(args)
 
         logger.debug("kubectl %s", " ".join(args))
         proc = await asyncio.create_subprocess_exec(
@@ -76,9 +77,10 @@ class Kubectl:
         if namespace:
             args.extend(["-n", namespace])
 
-        cmd = ["kubectl", *args]
+        cmd = ["kubectl"]
         if self.kubeconfig:
             cmd.extend(["--kubeconfig", self.kubeconfig])
+        cmd.extend(args)
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -210,9 +212,10 @@ class Kubectl:
                 "yaml",
             ]
         )
-        cmd = ["kubectl", "apply", "-f", "-"]
+        cmd = ["kubectl"]
         if self.kubeconfig:
             cmd.extend(["--kubeconfig", self.kubeconfig])
+        cmd.extend(["apply", "-f", "-"])
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -240,9 +243,10 @@ class Kubectl:
                 "yaml",
             ]
         )
-        cmd = ["kubectl", "apply", "-f", "-"]
+        cmd = ["kubectl"]
         if self.kubeconfig:
             cmd.extend(["--kubeconfig", self.kubeconfig])
+        cmd.extend(["apply", "-f", "-"])
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
