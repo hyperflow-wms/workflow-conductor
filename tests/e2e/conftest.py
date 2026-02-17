@@ -116,7 +116,7 @@ def e2e_settings() -> ConductorSettings:
         monitor_poll_interval=5,
         monitor_timeout=600,
         hyperflow_k8s_deployment_path=k8s_path,
-        kubernetes={"kind_config": "local/kind-config-3n.yaml"},  # type: ignore[arg-type]
+        kubernetes={"kind_config": "local/kind-config-1n.yaml"},  # type: ignore[arg-type]
         helm={  # type: ignore[arg-type]
             "ops_values": os.path.join(k8s_path, "local/values-fast-test-ops.yaml"),
             "run_values": os.path.join(k8s_path, "local/values-fast-test-run.yaml"),

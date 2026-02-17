@@ -26,7 +26,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 @pytest.fixture(scope="session")
 def settings() -> ConductorSettings:
     return ConductorSettings(
-        kubernetes={"kind_config": "local/kind-config-3n.yaml"},  # type: ignore[arg-type]
+        kubernetes={"kind_config": "local/kind-config-1n.yaml"},  # type: ignore[arg-type]
     )
 
 
