@@ -90,6 +90,12 @@ class TestGenerateHelmValues:
         values = generate_helm_values(settings, plan, namespace="test-ns")
         assert values["nfs-volume"]["pv"]["capacity"]["storage"] == "10Gi"
 
+    def test_worker_pools_disabled(self) -> None:
+        settings = ConductorSettings()
+        plan = WorkflowPlan()
+        values = generate_helm_values(settings, plan, namespace="test-ns")
+        assert values["workerPools"]["enabled"] is False
+
     def test_engine_command_waits_for_signal(self) -> None:
         settings = ConductorSettings()
         plan = WorkflowPlan()
