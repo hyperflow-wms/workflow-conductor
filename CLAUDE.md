@@ -66,9 +66,9 @@ NL Prompt → ROUTING → PLANNING → VALIDATION (Gate 1) → PROVISIONING → 
 
          → APPROVAL (Gate 2) → DEPLOYMENT → MONITORING → COMPLETION
               │                    │            │            │
-           Rich UI              ConfigMap     poll K8s    teardown+
-           approve/abort        + hf-run      job status  summary
-           real task counts     Helm install
+           Rich UI              hf-run Helm   poll K8s    teardown+
+           approve/abort        + kubectl cp  job status  summary
+           real task counts     + signal engine
 ```
 
 ### Key Patterns
@@ -78,7 +78,7 @@ NL Prompt → ROUTING → PLANNING → VALIDATION (Gate 1) → PROVISIONING → 
 - **Context replay**: `planner_history` serialized in state enables conversation history to cross Temporal activity boundaries
 - **Context synthesis**: `synthesize_context_for_composer()` builds coherent context for stateless Composer calls during refinement loops
 - **K8s via subprocess**: Async wrappers around helm/kubectl (not Python K8s client); mirrors `fast-test.sh` flow
-- **ConfigMap workflow delivery**: workflow.json injected via ConfigMap mount (not kubectl cp)
+- **Conductor signal pattern**: Engine waits for `.conductor-ready` signal; after data staging completes, conductor copies workflow.json via `kubectl cp` then signals engine to start (data image overwrites ConfigMap mounts on NFS)
 - **LLM factory**: `{"anthropic": AnthropicAugmentedLLM, "google": GoogleAugmentedLLM}` — provider switchable via config
 
 ### External Components
@@ -98,7 +98,7 @@ NL Prompt → ROUTING → PLANNING → VALIDATION (Gate 1) → PROVISIONING → 
 - **All timestamps**: `datetime.now(UTC)` (not naive datetimes)
 - **K8s ops**: subprocess helm/kubectl for MVP; kagent-tool-server in Stage 6
 - **K8s testing**: Kind primary, kr8s for async test assertions
-- **Workflow delivery**: ConfigMap mount (not kubectl cp)
+- **Workflow delivery**: Conductor signal pattern — kubectl cp after data staging + signal file (ConfigMap alone insufficient; data image overwrites NFS mount)
 - **Config**: pydantic-settings with `HF_CONDUCTOR_` prefix, `__` nested delimiter
 - **CLI**: Click + Rich
 - **Package layout**: `src/workflow_conductor/` with `phases/`, `k8s/`, `ui/` subpackages
