@@ -76,6 +76,20 @@ class TestGenerateHelmValues:
         values = generate_helm_values(settings, plan, namespace="test-ns")
         assert values["nfs-volume"]["pv"]["capacity"]["storage"] == "10Gi"
 
+    def test_nfs_volume_scales_for_large_data(self) -> None:
+        settings = ConductorSettings()
+        plan = WorkflowPlan(estimated_data_size_gb=12.0)
+        values = generate_helm_values(settings, plan, namespace="test-ns")
+        storage = values["nfs-volume"]["pv"]["capacity"]["storage"]
+        # 12 * 2 + 5 = 29Gi
+        assert storage == "29Gi"
+
+    def test_nfs_volume_minimum_10gi(self) -> None:
+        settings = ConductorSettings()
+        plan = WorkflowPlan(estimated_data_size_gb=2.0)
+        values = generate_helm_values(settings, plan, namespace="test-ns")
+        assert values["nfs-volume"]["pv"]["capacity"]["storage"] == "10Gi"
+
     def test_engine_command_waits_for_signal(self) -> None:
         settings = ConductorSettings()
         plan = WorkflowPlan()

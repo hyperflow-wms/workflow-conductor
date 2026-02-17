@@ -8,6 +8,19 @@ from workflow_conductor.config import ConductorSettings
 from workflow_conductor.models import ResourceProfile, WorkflowPlan
 
 
+def _nfs_storage_size(plan: WorkflowPlan) -> str:
+    """Compute NFS PVC size based on estimated data size.
+
+    Default 10Gi is sufficient for chr1-10 from the data container.
+    For remote chromosomes (larger data), scale up based on the Composer's
+    estimated_data_size_gb (accounts for compressed + uncompressed).
+    """
+    if plan.estimated_data_size_gb > 5:
+        size_gi = max(10, int(plan.estimated_data_size_gb * 2) + 5)
+        return f"{size_gi}Gi"
+    return "10Gi"
+
+
 def generate_helm_values(
     settings: ConductorSettings,
     plan: WorkflowPlan,
@@ -99,7 +112,7 @@ def generate_helm_values(
         "nfs-volume": {
             "pv": {
                 "capacity": {
-                    "storage": "10Gi",
+                    "storage": _nfs_storage_size(plan),
                 },
             },
         },

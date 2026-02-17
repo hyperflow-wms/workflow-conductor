@@ -89,5 +89,7 @@ class ConductorSettings(BaseSettings):
     data_container_chromosomes: list[str] = Field(
         default_factory=lambda: [str(i) for i in range(1, 11)]
     )
+    tabix_image: str = "broadinstitute/gatk:4.4.0.0"
+    tabix_job_timeout: int = 600
     monitor_poll_interval: int = 10
     monitor_timeout: int = 3600

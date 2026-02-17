@@ -202,13 +202,24 @@ async def run_planning_phase(
             len(state.workflow_json.get("processes", [])),
         )
 
+    # Extract data preparation commands from Composer response
+    raw_plan = plan_data.get("raw_plan", plan_data)
+    dp = raw_plan.get("data_preparation", {})
+    download_commands: list[str] = []
+    for step in dp.get("steps", []):
+        download_commands.extend(step.get("commands", []))
+    if download_commands:
+        logger.info("Extracted %d download commands from plan", len(download_commands))
+
     state.workflow_plan = WorkflowPlan(
         description=plan_data.get("description", response[:500]),
         chromosomes=plan_data.get("chromosomes", []),
         populations=plan_data.get("populations", []),
         parallelism=plan_data.get("parallelism"),
         estimated_data_size_gb=plan_data.get("estimated_data_size_gb", 0.0),
-        raw_plan=plan_data.get("raw_plan", plan_data),
+        download_commands=download_commands,
+        data_preparation=dp,
+        raw_plan=raw_plan,
     )
 
     # Capture conversation history for context replay in later phases.
