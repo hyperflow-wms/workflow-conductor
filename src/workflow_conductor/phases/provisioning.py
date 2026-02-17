@@ -57,10 +57,11 @@ async def run_provisioning_phase(
         if not await cluster.exists():
             logger.info("Creating Kind cluster: %s", cluster.name)
             await cluster.create()
+            # Fresh cluster — skip image_loaded check (nothing loaded yet)
             await asyncio.gather(
-                cluster.load_image(settings.hf_engine_image),
-                cluster.load_image(settings.worker_image),
-                cluster.load_image(settings.data_image),
+                cluster.load_image(settings.hf_engine_image, skip_check=True),
+                cluster.load_image(settings.worker_image, skip_check=True),
+                cluster.load_image(settings.data_image, skip_check=True),
             )
 
         # Always export Kind kubeconfig for Kind clusters — the system's

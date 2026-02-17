@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -54,14 +56,17 @@ async def kind_cluster(
     if not await cluster.exists():
         await cluster.create()
         created = True
-        # Load images in parallel (skip-if-present built into load_image)
-        import asyncio
-
-        await asyncio.gather(
-            cluster.load_image(settings.hf_engine_image),
-            cluster.load_image(settings.worker_image),
-            cluster.load_image(settings.data_image),
+        # Load images in parallel; tolerate failures (image may not be
+        # in local Docker daemon, e.g. CI without make docker-pull-images)
+        results = await asyncio.gather(
+            cluster.load_image(settings.hf_engine_image, skip_check=True),
+            cluster.load_image(settings.worker_image, skip_check=True),
+            cluster.load_image(settings.data_image, skip_check=True),
+            return_exceptions=True,
         )
+        for r in results:
+            if isinstance(r, Exception):
+                logging.getLogger(__name__).warning("Image load failed: %s", r)
 
     await cluster.use_context()
 
