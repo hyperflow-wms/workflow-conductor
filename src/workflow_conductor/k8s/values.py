@@ -116,6 +116,11 @@ def generate_helm_values(
                 },
             },
         },
+        # Disable worker pools (1000genome uses job-based execution, not
+        # the WorkerPool CRD which requires the operator chart in hf-ops)
+        "workerPools": {
+            "enabled": False,
+        },
         "hyperflow-nfs-data": {
             "workflow": {
                 "image": settings.data_image,
