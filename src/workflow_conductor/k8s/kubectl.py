@@ -336,6 +336,37 @@ class Kubectl:
             args.extend(["-c", container])
         return await self._run(args, check=False)
 
+    async def exec_in_pod(
+        self,
+        pod: str,
+        command: list[str],
+        *,
+        namespace: str,
+        container: str = "",
+    ) -> str:
+        """Execute a command in a pod."""
+        args = ["exec", pod, "-n", namespace]
+        if container:
+            args.extend(["-c", container])
+        args.append("--")
+        args.extend(command)
+        return await self._run(args)
+
+    async def cp_to_pod(
+        self,
+        local_path: str,
+        pod: str,
+        remote_path: str,
+        *,
+        namespace: str,
+        container: str = "",
+    ) -> str:
+        """Copy a local file to a pod."""
+        args = ["cp", local_path, f"{pod}:{remote_path}", "-n", namespace]
+        if container:
+            args.extend(["-c", container])
+        return await self._run(args)
+
     async def cleanup_previous_runs(
         self,
         namespace_prefix: str,

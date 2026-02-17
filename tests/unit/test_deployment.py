@@ -56,6 +56,9 @@ class TestDeploymentPhase:
             kubectl.wait_for_delete = AsyncMock()
             kubectl.create_configmap_from_file = AsyncMock()
             kubectl.wait_for_pod = AsyncMock(return_value="engine-pod-123")
+            kubectl.wait_for_job = AsyncMock()
+            kubectl.cp_to_pod = AsyncMock()
+            kubectl.exec_in_pod = AsyncMock()
 
             helm = MockHelm.return_value
             helm.upgrade_install = AsyncMock()
@@ -115,6 +118,9 @@ class TestDeploymentPhase:
             kubectl.wait_for_delete = AsyncMock()
             kubectl.create_configmap_from_file = AsyncMock()
             kubectl.wait_for_pod = AsyncMock(return_value="pod-1")
+            kubectl.wait_for_job = AsyncMock()
+            kubectl.cp_to_pod = AsyncMock()
+            kubectl.exec_in_pod = AsyncMock()
 
             helm = MockHelm.return_value
             helm.upgrade_install = AsyncMock()
@@ -145,6 +151,9 @@ class TestDeploymentPhase:
             kubectl.wait_for_delete = AsyncMock()
             kubectl.create_configmap_from_file = AsyncMock()
             kubectl.wait_for_pod = AsyncMock(return_value="pod-1")
+            kubectl.wait_for_job = AsyncMock()
+            kubectl.cp_to_pod = AsyncMock()
+            kubectl.exec_in_pod = AsyncMock()
 
             helm = MockHelm.return_value
             helm.upgrade_install = AsyncMock()

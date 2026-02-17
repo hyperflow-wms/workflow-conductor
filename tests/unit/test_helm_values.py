@@ -18,7 +18,7 @@ class TestGenerateHelmValues:
         values = generate_helm_values(settings, plan, namespace="test-ns")
         engine = values["hyperflow-engine"]
         assert engine["containers"]["hyperflow"]["image"] == settings.hf_engine_image
-        assert engine["containers"]["hyperflow"]["autoRun"] is True
+        assert "command" in engine["containers"]["hyperflow"]
         assert engine["containers"]["worker"]["image"] == settings.worker_image
 
     def test_configmap_volume_mount(self) -> None:

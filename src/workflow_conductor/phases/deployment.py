@@ -61,7 +61,7 @@ async def run_deployment_phase(
             timeout=60,
         )
 
-    # Step 2: Inject workflow.json via ConfigMap
+    # Step 2: Write workflow.json to temp file for ConfigMap + later NFS copy
     logger.info("Step 2: Creating workflow.json ConfigMap")
     if state.workflow_json:
         with tempfile.NamedTemporaryFile(
@@ -125,5 +125,32 @@ async def run_deployment_phase(
     )
     state.engine_pod_name = pod_name
     logger.info("Engine pod ready: %s", pod_name)
+
+    # Step 5: Wait for data staging, copy workflow.json, signal engine
+    # The data image ships a default workflow.json that overwrites our
+    # ConfigMap mount on the NFS volume. We wait for data staging to
+    # complete, then overwrite with our generated workflow.json and
+    # signal the engine to start.
+    logger.info("Step 5: Waiting for nfs-data job to complete")
+    await kubectl.wait_for_job("nfs-data", namespace=namespace, timeout=300)
+
+    if state.workflow_json_path:
+        logger.info("Step 6: Copying workflow.json to NFS volume")
+        await kubectl.cp_to_pod(
+            state.workflow_json_path,
+            pod_name,
+            "/work_dir/workflow.json",
+            namespace=namespace,
+            container="hyperflow",
+        )
+
+    # Signal engine to start
+    logger.info("Step 7: Signaling engine to start")
+    await kubectl.exec_in_pod(
+        pod_name,
+        ["touch", "/work_dir/.conductor-ready"],
+        namespace=namespace,
+        container="hyperflow",
+    )
 
     return state

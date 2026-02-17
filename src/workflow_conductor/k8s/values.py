@@ -24,12 +24,37 @@ def generate_helm_values(
     (not merges) list values.  We include the chart defaults alongside
     our workflow-json ConfigMap addition.
     """
+    # Custom engine command: wait for conductor to signal readiness
+    # before running hflow. This prevents the engine from running the
+    # default workflow.json shipped by the data image before the
+    # conductor can overwrite it with the generated one.
+    engine_command = [
+        "/bin/sh",
+        "-c",
+        (
+            "echo 'Waiting for conductor signal...' ; "
+            "while ! [ -f /work_dir/.conductor-ready ]; do sleep 2 ; done ; "
+            "echo 'Conductor signal received.' ; "
+            "cd /work_dir ; "
+            "mkdir -p /work_dir/logs-hf ; "
+            "echo 'Running workflow:' ; "
+            "hflow run workflow.json ; "
+            'if [ "$(ls -A /work_dir/logs-hf)" ]; then '
+            "  echo 1 > /work_dir/postprocStart ; "
+            "else "
+            "  echo 'HyperFlow logs not collected.' ; "
+            "fi ; "
+            "echo 'Workflow finished.' ; "
+            "while true; do sleep 5 ; done"
+        ),
+    ]
+
     values: dict[str, Any] = {
         "hyperflow-engine": {
             "containers": {
                 "hyperflow": {
                     "image": settings.hf_engine_image,
-                    "autoRun": True,
+                    "command": engine_command,
                     "volumeMounts": [
                         # Chart defaults
                         {"name": "workflow-data", "mountPath": "/work_dir"},
