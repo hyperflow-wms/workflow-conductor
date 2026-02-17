@@ -190,6 +190,7 @@ class TestCleanupPreviousRuns:
         procs = [
             _mock_proc(""),  # get pv (Released)
             _mock_proc("wf-1000g-old wf-1000g-current"),  # namespaces
+            _mock_proc(),  # force-delete pods in old ns
             _mock_proc(),  # delete old ns
             _mock_proc(""),  # get Terminating namespaces
             *[_mock_proc() for _ in range(6)],  # cluster resources
@@ -205,20 +206,34 @@ class TestCleanupPreviousRuns:
 
     @pytest.mark.asyncio
     async def test_force_removes_terminating_namespaces(self, kubectl: Kubectl) -> None:
+        ns_json = json.dumps(
+            {
+                "apiVersion": "v1",
+                "kind": "Namespace",
+                "metadata": {"name": "wf-1000g-stuck"},
+                "spec": {"finalizers": ["kubernetes"]},
+            }
+        )
         procs = [
             _mock_proc(""),  # get pv (Released)
             _mock_proc(""),  # get namespaces (none active)
             _mock_proc("wf-1000g-stuck"),  # get Terminating
-            _mock_proc(),  # patch ns
+            _mock_proc(),  # force-delete pods
+            _mock_proc(ns_json),  # get namespace JSON
+            _mock_proc(),  # replace --raw /finalize
             *[_mock_proc() for _ in range(6)],  # cluster resources
         ]
         with patch("asyncio.create_subprocess_exec", side_effect=procs) as mock_exec:
             await kubectl.cleanup_previous_runs("wf-1000g")
-            calls = [c[0] for c in mock_exec.call_args_list]
-            patch_call = calls[3]
-            assert "patch" in patch_call
-            assert "wf-1000g-stuck" in patch_call
-            assert "finalizers" in " ".join(patch_call)
+            all_args = [" ".join(c[0]) for c in mock_exec.call_args_list]
+            # Should force-delete pods
+            pod_deletes = [a for a in all_args if "delete pods --all" in a]
+            assert len(pod_deletes) == 1
+            assert "wf-1000g-stuck" in pod_deletes[0]
+            # Should call replace --raw with /finalize endpoint
+            finalize_calls = [a for a in all_args if "finalize" in a]
+            assert len(finalize_calls) == 1
+            assert "/api/v1/namespaces/wf-1000g-stuck/finalize" in finalize_calls[0]
 
     @pytest.mark.asyncio
     async def test_deletes_all_cluster_scoped_resources(self, kubectl: Kubectl) -> None:

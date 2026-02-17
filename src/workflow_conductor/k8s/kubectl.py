@@ -404,7 +404,9 @@ class Kubectl:
                     check=False,
                 )
 
-        # Step 2: Delete old namespaces (non-blocking)
+        # Step 2: Delete old namespaces
+        # Force-delete all pods first (engine runs `while true; sleep 5`)
+        # then delete namespace, then clear spec.finalizers on any stuck ones
         output = await self._run(
             ["get", "namespaces", "-o", "jsonpath={.items[*].metadata.name}"],
             check=False,
@@ -412,9 +414,23 @@ class Kubectl:
         for ns in output.split():
             if ns.startswith(namespace_prefix) and ns != current_namespace:
                 logger.info("Cleaning up old namespace: %s", ns)
+                await self._run(
+                    [
+                        "delete",
+                        "pods",
+                        "--all",
+                        "-n",
+                        ns,
+                        "--force",
+                        "--grace-period=0",
+                    ],
+                    check=False,
+                )
                 await self.delete_namespace(ns)
 
         # Step 3: Force-remove namespaces stuck in Terminating state
+        # Namespace finalizers live at spec.finalizers (not metadata);
+        # must use the /finalize API endpoint via kubectl replace --raw
         term_output = await self._run(
             [
                 "get",
@@ -427,17 +443,49 @@ class Kubectl:
         for ns in term_output.split():
             if ns.startswith(namespace_prefix) and ns != current_namespace:
                 logger.info("Force-removing stuck namespace: %s", ns)
+                # Force-delete remaining pods first
                 await self._run(
                     [
-                        "patch",
-                        "namespace",
+                        "delete",
+                        "pods",
+                        "--all",
+                        "-n",
                         ns,
-                        "--type=merge",
-                        "-p",
-                        '{"metadata":{"finalizers":null}}',
+                        "--force",
+                        "--grace-period=0",
                     ],
                     check=False,
                 )
+                # Clear spec.finalizers via the /finalize API
+                ns_json = await self._run(
+                    ["get", "namespace", ns, "-o", "json"],
+                    check=False,
+                )
+                if ns_json:
+                    ns_obj = json.loads(ns_json)
+                    ns_obj.setdefault("spec", {})["finalizers"] = []
+                    cmd = ["kubectl"]
+                    if self.kubeconfig:
+                        cmd.extend(["--kubeconfig", self.kubeconfig])
+                    cmd.extend(
+                        [
+                            "replace",
+                            "--raw",
+                            f"/api/v1/namespaces/{ns}/finalize",
+                            "-f",
+                            "-",
+                        ]
+                    )
+                    proc = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdin=asyncio.subprocess.PIPE,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    await asyncio.wait_for(
+                        proc.communicate(input=json.dumps(ns_obj).encode()),
+                        timeout=30,
+                    )
 
         # Step 4: Delete orphaned cluster-scoped resources
         for resource in [
