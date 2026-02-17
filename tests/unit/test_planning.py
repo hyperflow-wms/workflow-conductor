@@ -124,9 +124,8 @@ class TestDownloadCommandsExtraction:
 class TestChromosomeInference:
     """Verify chromosome inference from download commands and workflow JSON."""
 
-    def test_infers_chromosomes_from_download_commands(self) -> None:
-        """When LLM uses gene regions (BRCA1), chromosomes should be
-        inferred from chr(digit) patterns in download commands."""
+    def test_empty_history_yields_no_chromosomes(self) -> None:
+        """Empty LLM history produces no inferred chromosomes."""
         from workflow_conductor.phases.planning import (
             _extract_plan_data_from_history,
         )
@@ -136,16 +135,9 @@ class TestChromosomeInference:
         history_mock.get.return_value = []
         mock_llm.history = history_mock
 
-        # Manually inject raw_plan with download commands containing chr17
-        # (simulating what _extract_plan_data_from_history would collect
-        # from history, then testing the inference logic)
-        #
-        # We test the public function by providing a mock LLM that has
-        # no history items — then we test the internal _extract function
-        # for completeness below.
         result = _extract_plan_data_from_history(mock_llm)
-        # Empty history → no chromosomes
         assert result.get("chromosomes") is None
+        assert result.get("download_commands") is None
 
     def test_infers_from_raw_plan_commands(self) -> None:
         """Chromosomes inferred from raw_plan data_preparation commands."""
@@ -323,3 +315,64 @@ class TestChromosomeInference:
         # But workflow_json was captured
         assert result.workflow_json is not None
         assert len(result.workflow_json["processes"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_history_fallback_when_text_raw_plan_lacks_commands(
+        self,
+    ) -> None:
+        """When the text response has a raw_plan without data_preparation
+        but the history has download_commands, the fallback populates them."""
+        import json
+
+        from workflow_conductor.models import PipelineState
+        from workflow_conductor.phases.planning import run_planning_phase
+
+        state = PipelineState()
+        state.intent_classification = "1000genome"
+        state.add_conversation("user", "Analyze BRCA1 in British population")
+        settings = ConductorSettings()
+
+        # Text response parses as JSON with raw_plan but NO data_preparation
+        text_plan = {
+            "description": "BRCA1 analysis",
+            "raw_plan": {"description": "BRCA1 workflow", "analysis_steps": []},
+        }
+        mock_llm = _make_mock_llm(json.dumps(text_plan))
+
+        # History has plan_workflow response with data_preparation commands
+        plan_text = (
+            "## Workflow Plan\n\n```json\n"
+            '{"description": "BRCA1 analysis", '
+            '"data_preparation": {"steps": [{"commands": ['
+            '"tabix -h https://ftp.example.com/ALL.chr17.vcf.gz '
+            'chr17:41196312-41277500 > ALL.chr17.250000.vcf"'
+            "]}]}}\n```"
+        )
+
+        fr_part = MagicMock()
+        fr_part.function_call = None
+        fr_response = MagicMock()
+        fr_response.response = {"result": [MagicMock(text=plan_text)]}
+        fr_part.function_response = fr_response
+
+        msg = MagicMock()
+        msg.parts = [fr_part]
+
+        history_mock = MagicMock()
+        history_mock.get.return_value = [msg]
+        mock_llm.history = history_mock
+
+        mock_agent = _make_mock_agent(mock_llm)
+
+        with patch(
+            "workflow_conductor.phases.planning.Agent",
+            return_value=mock_agent,
+        ):
+            result = await run_planning_phase(state, settings)
+
+        assert result.workflow_plan is not None
+        # Chromosomes inferred from history download commands
+        assert result.workflow_plan.chromosomes == ["17"]
+        # Download commands populated via history fallback
+        assert len(result.workflow_plan.download_commands) == 1
+        assert "chr17" in result.workflow_plan.download_commands[0]
