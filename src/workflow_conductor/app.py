@@ -24,6 +24,7 @@ from workflow_conductor.models import (
 )
 from workflow_conductor.phases.approval import run_approval_phase
 from workflow_conductor.phases.completion import run_completion_phase
+from workflow_conductor.phases.data_preparation import run_data_preparation_phase
 from workflow_conductor.phases.deployment import run_deployment_phase
 from workflow_conductor.phases.generation import run_generation_phase
 from workflow_conductor.phases.monitoring import run_monitoring_phase
@@ -113,11 +114,11 @@ async def run_pipeline(
     auto_approve: bool = False,
     demo: bool = False,
 ) -> PipelineState:
-    """Execute the full 9-phase pipeline.
+    """Execute the full 10-phase pipeline.
 
     Phases: ROUTING -> PLANNING -> VALIDATION (Gate 1) -> PROVISIONING
-            -> GENERATION -> APPROVAL (Gate 2) -> DEPLOYMENT -> MONITORING
-            -> COMPLETION
+            -> DATA_PREPARATION -> GENERATION -> APPROVAL (Gate 2)
+            -> DEPLOYMENT -> MONITORING -> COMPLETION
 
     If dry_run is True, stops after VALIDATION (Gate 1).
     If demo is True, shows phase explanations and pauses between phases.
@@ -189,7 +190,19 @@ async def run_pipeline(
         if demo:
             demo_pause()
 
-        # Phase 5: Generation
+        # Phase 5: Data Preparation
+        if demo:
+            display_phase_explanation(PipelinePhase.DATA_PREPARATION)
+        state = await _run_phase(
+            PipelinePhase.DATA_PREPARATION,
+            state,
+            run_data_preparation_phase,
+            settings,
+        )
+        if demo:
+            demo_pause()
+
+        # Phase 6: Generation
         if demo:
             display_phase_explanation(PipelinePhase.GENERATION)
         state = await _run_phase(
@@ -203,7 +216,7 @@ async def run_pipeline(
         if demo:
             demo_pause()
 
-        # Phase 6: Approval (Gate 2)
+        # Phase 7: Approval (Gate 2)
         if demo:
             display_phase_explanation(PipelinePhase.APPROVAL)
         state = await _run_phase(
@@ -224,7 +237,7 @@ async def run_pipeline(
             logger.info("Execution not approved, stopping pipeline")
             return state
 
-        # Phase 7: Deployment
+        # Phase 8: Deployment
         if demo:
             display_phase_explanation(PipelinePhase.DEPLOYMENT)
         state = await _run_phase(
@@ -236,7 +249,7 @@ async def run_pipeline(
         if demo:
             demo_pause()
 
-        # Phase 8: Monitoring
+        # Phase 9: Monitoring
         if demo:
             display_phase_explanation(PipelinePhase.MONITORING)
         state = await _run_phase(
@@ -251,7 +264,7 @@ async def run_pipeline(
                 "| Press Enter to tear down and finish..."
             )
 
-        # Phase 9: Completion
+        # Phase 10: Completion
         if demo:
             display_phase_explanation(PipelinePhase.COMPLETION)
         state = await _run_phase(

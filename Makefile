@@ -82,7 +82,7 @@ run-query: ## Run with custom prompt (usage: make run-query Q="...")
 .PHONY: demo
 demo: ## Run conductor in demo mode (explanations + pauses)
 	$(UV) run workflow-conductor run --demo --auto-approve \
-		"Do European and African populations show different patterns of shared deleterious mutations on chromosome 22?"
+		"Do European and African populations show different patterns of shared deleterious mutations on chromosome 1?"
 
 .PHONY: run-debug
 run-debug: ## Run conductor in debug mode

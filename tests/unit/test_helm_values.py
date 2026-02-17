@@ -18,23 +18,23 @@ class TestGenerateHelmValues:
         values = generate_helm_values(settings, plan, namespace="test-ns")
         engine = values["hyperflow-engine"]
         assert engine["containers"]["hyperflow"]["image"] == settings.hf_engine_image
-        assert engine["containers"]["hyperflow"]["autoRun"] is True
+        # Conductor signal pattern: engine command waits for .conductor-ready
+        assert "command" in engine["containers"]["hyperflow"]
         assert engine["containers"]["worker"]["image"] == settings.worker_image
 
-    def test_configmap_volume_mount(self) -> None:
+    def test_volumes_complete(self) -> None:
         settings = ConductorSettings()
         plan = WorkflowPlan()
         values = generate_helm_values(settings, plan, namespace="test-ns")
         engine = values["hyperflow-engine"]
         mounts = engine["containers"]["hyperflow"]["volumeMounts"]
-        assert any(m["name"] == "workflow-json" for m in mounts)
-        assert any(m["mountPath"] == "/work_dir/workflow.json" for m in mounts)
         # Chart defaults must be preserved
         assert any(m["name"] == "workflow-data" for m in mounts)
         assert any(m["name"] == "config-map" for m in mounts)
+        assert any(m["name"] == "worker-config" for m in mounts)
         vols = engine["volumes"]
-        assert any(v["name"] == "workflow-json" for v in vols)
         assert any(v["name"] == "workflow-data" for v in vols)
+        assert any(v["name"] == "config-map" for v in vols)
 
     def test_data_image(self) -> None:
         settings = ConductorSettings()
@@ -69,3 +69,20 @@ class TestGenerateHelmValues:
         plan = WorkflowPlan()
         values = generate_helm_values(settings, plan, namespace="test-ns")
         assert "jobTemplateResources" not in values["hyperflow-engine"]
+
+    def test_nfs_volume_capacity(self) -> None:
+        settings = ConductorSettings()
+        plan = WorkflowPlan()
+        values = generate_helm_values(settings, plan, namespace="test-ns")
+        assert values["nfs-volume"]["pv"]["capacity"]["storage"] == "10Gi"
+
+    def test_engine_command_waits_for_signal(self) -> None:
+        settings = ConductorSettings()
+        plan = WorkflowPlan()
+        values = generate_helm_values(settings, plan, namespace="test-ns")
+        engine = values["hyperflow-engine"]
+        cmd = engine["containers"]["hyperflow"]["command"]
+        # Command should wait for conductor signal
+        cmd_str = cmd[2] if len(cmd) > 2 else ""
+        assert ".conductor-ready" in cmd_str
+        assert "hflow run workflow.json" in cmd_str

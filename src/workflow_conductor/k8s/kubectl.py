@@ -29,9 +29,10 @@ class Kubectl:
         check: bool = True,
     ) -> str:
         """Run a kubectl command and return stdout."""
-        cmd = ["kubectl", *args]
+        cmd = ["kubectl"]
         if self.kubeconfig:
             cmd.extend(["--kubeconfig", self.kubeconfig])
+        cmd.extend(args)
 
         logger.debug("kubectl %s", " ".join(args))
         proc = await asyncio.create_subprocess_exec(
@@ -76,9 +77,10 @@ class Kubectl:
         if namespace:
             args.extend(["-n", namespace])
 
-        cmd = ["kubectl", *args]
+        cmd = ["kubectl"]
         if self.kubeconfig:
             cmd.extend(["--kubeconfig", self.kubeconfig])
+        cmd.extend(args)
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -210,9 +212,10 @@ class Kubectl:
                 "yaml",
             ]
         )
-        cmd = ["kubectl", "apply", "-f", "-"]
+        cmd = ["kubectl"]
         if self.kubeconfig:
             cmd.extend(["--kubeconfig", self.kubeconfig])
+        cmd.extend(["apply", "-f", "-"])
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -240,9 +243,10 @@ class Kubectl:
                 "yaml",
             ]
         )
-        cmd = ["kubectl", "apply", "-f", "-"]
+        cmd = ["kubectl"]
         if self.kubeconfig:
             cmd.extend(["--kubeconfig", self.kubeconfig])
+        cmd.extend(["apply", "-f", "-"])
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -335,6 +339,38 @@ class Kubectl:
         if container:
             args.extend(["-c", container])
         return await self._run(args, check=False)
+
+    async def exec_in_pod(
+        self,
+        pod: str,
+        command: list[str],
+        *,
+        namespace: str,
+        container: str = "",
+        timeout: float = 600,
+    ) -> str:
+        """Execute a command in a pod and return stdout."""
+        args = ["exec", pod, "-n", namespace]
+        if container:
+            args.extend(["-c", container])
+        args.append("--")
+        args.extend(command)
+        return await self._run(args, timeout=timeout)
+
+    async def cp_to_pod(
+        self,
+        local_path: str,
+        pod: str,
+        remote_path: str,
+        *,
+        namespace: str,
+        container: str = "",
+    ) -> str:
+        """Copy a local file to a pod."""
+        args = ["cp", local_path, f"{pod}:{remote_path}", "-n", namespace]
+        if container:
+            args.extend(["-c", container])
+        return await self._run(args, timeout=120)
 
     async def cleanup_previous_runs(
         self,

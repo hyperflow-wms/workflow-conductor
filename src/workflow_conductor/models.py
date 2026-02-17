@@ -14,9 +14,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class PipelinePhase(StrEnum):
-    """Pipeline phases — 9-phase architecture (Stage 2).
+    """Pipeline phases — 10-phase architecture.
 
-    Phases PROVISIONING, GENERATION, and APPROVAL added in Stage 2
+    Phases PROVISIONING, DATA_PREPARATION, GENERATION, and APPROVAL
     between VALIDATION and DEPLOYMENT.
     """
 
@@ -24,6 +24,7 @@ class PipelinePhase(StrEnum):
     PLANNING = "planning"
     VALIDATION = "validation"
     PROVISIONING = "provisioning"
+    DATA_PREPARATION = "data_preparation"
     GENERATION = "generation"
     APPROVAL = "approval"
     DEPLOYMENT = "deployment"
