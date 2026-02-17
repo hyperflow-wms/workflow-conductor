@@ -1,6 +1,7 @@
 # Single node cluster config for dev/test/demo.
-# Faster image loading (1 node vs 4). The worker node gets both
-# hfmaster and hfworker labels so all nodeSelectors are satisfied.
+# Faster image loading (1 node vs 4). The worker node is labeled
+# hfmaster; the job-template nodeSelector is overridden to hfmaster
+# in values.py so worker jobs also schedule on this node.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
