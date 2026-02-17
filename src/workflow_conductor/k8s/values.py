@@ -71,7 +71,6 @@ def generate_helm_values(
                     "image": settings.hf_engine_image,
                     "command": engine_command,
                     "volumeMounts": [
-                        # Chart defaults
                         {"name": "workflow-data", "mountPath": "/work_dir"},
                         {
                             "name": "config-map",
@@ -79,21 +78,14 @@ def generate_helm_values(
                             "subPath": "job-template.yaml",
                             "readOnly": True,
                         },
-                        {
-                            "name": "worker-config",
-                            "mountPath": (
-                                "/work_dir/workflow.config.executionModels.json"
-                            ),
-                            "subPath": "workflow.config.executionModels.json",
-                            "readOnly": True,
-                        },
+                        # worker-config mount removed: ConfigMap only exists
+                        # when workerPools.enabled=true (workerpools-cm.yml)
                     ],
                 },
                 "worker": {
                     "image": settings.worker_image,
                 },
             },
-            # Complete volumes list (chart defaults only)
             "volumes": [
                 {
                     "name": "config-map",
@@ -103,10 +95,8 @@ def generate_helm_values(
                     "name": "workflow-data",
                     "persistentVolumeClaim": {"claimName": "nfs"},
                 },
-                {
-                    "name": "worker-config",
-                    "configMap": {"name": "worker-config"},
-                },
+                # worker-config volume removed: ConfigMap only exists
+                # when workerPools.enabled=true (workerpools-cm.yml)
             ],
         },
         "nfs-volume": {

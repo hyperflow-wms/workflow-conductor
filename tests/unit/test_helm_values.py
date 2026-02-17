@@ -28,13 +28,14 @@ class TestGenerateHelmValues:
         values = generate_helm_values(settings, plan, namespace="test-ns")
         engine = values["hyperflow-engine"]
         mounts = engine["containers"]["hyperflow"]["volumeMounts"]
-        # Chart defaults must be preserved
         assert any(m["name"] == "workflow-data" for m in mounts)
         assert any(m["name"] == "config-map" for m in mounts)
-        assert any(m["name"] == "worker-config" for m in mounts)
+        # worker-config not mounted (only exists when workerPools enabled)
+        assert not any(m["name"] == "worker-config" for m in mounts)
         vols = engine["volumes"]
         assert any(v["name"] == "workflow-data" for v in vols)
         assert any(v["name"] == "config-map" for v in vols)
+        assert not any(v["name"] == "worker-config" for v in vols)
 
     def test_data_image(self) -> None:
         settings = ConductorSettings()
