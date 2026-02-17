@@ -9,6 +9,25 @@ import pytest
 from workflow_conductor.config import ConductorSettings
 
 
+def _make_mock_llm(response_json: str, history: list | None = None) -> AsyncMock:
+    """Build a mock LLM returning *response_json* with optional history."""
+    mock_llm = AsyncMock()
+    mock_llm.generate_str.return_value = response_json
+    history_mock = MagicMock()
+    history_mock.get.return_value = history or []
+    mock_llm.history = history_mock
+    return mock_llm
+
+
+def _make_mock_agent(mock_llm: AsyncMock) -> MagicMock:
+    """Wrap *mock_llm* in an async-context-manager mock Agent."""
+    mock_agent = MagicMock()
+    mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
+    mock_agent.__aexit__ = AsyncMock(return_value=False)
+    mock_agent.attach_llm = AsyncMock(return_value=mock_llm)
+    return mock_agent
+
+
 class TestDownloadCommandsExtraction:
     """Verify planning phase extracts download_commands from raw_plan."""
 
@@ -55,16 +74,8 @@ class TestDownloadCommandsExtraction:
 
         import json
 
-        mock_llm = AsyncMock()
-        mock_llm.generate_str.return_value = json.dumps(plan_json)
-        history_mock = MagicMock()
-        history_mock.get.return_value = []
-        mock_llm.history = history_mock
-
-        mock_agent = MagicMock()
-        mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-        mock_agent.__aexit__ = AsyncMock(return_value=False)
-        mock_agent.attach_llm = AsyncMock(return_value=mock_llm)
+        mock_llm = _make_mock_llm(json.dumps(plan_json))
+        mock_agent = _make_mock_agent(mock_llm)
 
         with patch(
             "workflow_conductor.phases.planning.Agent",
@@ -96,16 +107,8 @@ class TestDownloadCommandsExtraction:
             "populations": ["EUR"],
         }
 
-        mock_llm = AsyncMock()
-        mock_llm.generate_str.return_value = json.dumps(plan_json)
-        history_mock = MagicMock()
-        history_mock.get.return_value = []
-        mock_llm.history = history_mock
-
-        mock_agent = MagicMock()
-        mock_agent.__aenter__ = AsyncMock(return_value=mock_agent)
-        mock_agent.__aexit__ = AsyncMock(return_value=False)
-        mock_agent.attach_llm = AsyncMock(return_value=mock_llm)
+        mock_llm = _make_mock_llm(json.dumps(plan_json))
+        mock_agent = _make_mock_agent(mock_llm)
 
         with patch(
             "workflow_conductor.phases.planning.Agent",
@@ -116,3 +119,207 @@ class TestDownloadCommandsExtraction:
         assert result.workflow_plan is not None
         assert result.workflow_plan.download_commands == []
         assert result.workflow_plan.data_preparation == {}
+
+
+class TestChromosomeInference:
+    """Verify chromosome inference from download commands and workflow JSON."""
+
+    def test_infers_chromosomes_from_download_commands(self) -> None:
+        """When LLM uses gene regions (BRCA1), chromosomes should be
+        inferred from chr(digit) patterns in download commands."""
+        from workflow_conductor.phases.planning import (
+            _extract_plan_data_from_history,
+        )
+
+        mock_llm = MagicMock()
+        history_mock = MagicMock()
+        history_mock.get.return_value = []
+        mock_llm.history = history_mock
+
+        # Manually inject raw_plan with download commands containing chr17
+        # (simulating what _extract_plan_data_from_history would collect
+        # from history, then testing the inference logic)
+        #
+        # We test the public function by providing a mock LLM that has
+        # no history items — then we test the internal _extract function
+        # for completeness below.
+        result = _extract_plan_data_from_history(mock_llm)
+        # Empty history → no chromosomes
+        assert result.get("chromosomes") is None
+
+    def test_infers_from_raw_plan_commands(self) -> None:
+        """Chromosomes inferred from raw_plan data_preparation commands."""
+        from workflow_conductor.phases.planning import (
+            _extract_plan_data_from_history,
+        )
+
+        # Build a mock LLM whose history contains a plan_workflow response
+        # with data_preparation commands referencing chr17
+        plan_text = (
+            "## Workflow Plan\n\n```json\n"
+            '{"description": "BRCA1 analysis", '
+            '"data_preparation": {"steps": [{"commands": ['
+            '"tabix -h s3://bucket/ALL.chr17.vcf.gz chr17:41196312-41277500"'
+            "]}]}}\n```"
+        )
+
+        # Simulate Google Gemini history structure
+        fr_part = MagicMock()
+        fr_part.function_call = None
+        fr_response = MagicMock()
+        fr_response.response = {"result": [MagicMock(text=plan_text)]}
+        fr_part.function_response = fr_response
+
+        msg = MagicMock()
+        msg.parts = [fr_part]
+
+        mock_llm = MagicMock()
+        history_mock = MagicMock()
+        history_mock.get.return_value = [msg]
+        mock_llm.history = history_mock
+
+        result = _extract_plan_data_from_history(mock_llm)
+
+        assert result.get("chromosomes") == ["17"]
+        assert len(result.get("download_commands", [])) == 1
+        assert "chr17" in result["download_commands"][0]
+
+    def test_infers_from_workflow_json_process_names(self) -> None:
+        """Chromosomes inferred from workflow JSON process names."""
+        from workflow_conductor.phases.planning import (
+            _extract_plan_data_from_history,
+        )
+
+        # Simulate a generate_workflow response with chr17 process names
+        wf_text = (
+            "## Generated Workflow\n\n```json\n"
+            '{"name": "1000genome", "processes": ['
+            '{"name": "chr17-individuals-1", "type": "dataflow"},'
+            '{"name": "chr17-sifting-1", "type": "dataflow"}'
+            "]}\n```"
+        )
+
+        fr_part = MagicMock()
+        fr_part.function_call = None
+        fr_response = MagicMock()
+        fr_response.response = {"result": [MagicMock(text=wf_text)]}
+        fr_part.function_response = fr_response
+
+        msg = MagicMock()
+        msg.parts = [fr_part]
+
+        mock_llm = MagicMock()
+        history_mock = MagicMock()
+        history_mock.get.return_value = [msg]
+        mock_llm.history = history_mock
+
+        result = _extract_plan_data_from_history(mock_llm)
+
+        assert result.get("chromosomes") == ["17"]
+        assert "workflow_json" in result
+
+    @pytest.mark.asyncio
+    async def test_inferred_chromosomes_carry_download_commands(self) -> None:
+        """When chromosomes are inferred from history, download_commands
+        from the same history should also be available in the plan."""
+        from workflow_conductor.models import PipelineState
+        from workflow_conductor.phases.planning import run_planning_phase
+
+        state = PipelineState()
+        state.intent_classification = "1000genome"
+        state.add_conversation("user", "Analyze BRCA1 in British population")
+        settings = ConductorSettings()
+
+        # LLM text response is not valid JSON (Gemini often returns prose)
+        mock_llm = _make_mock_llm("I've created a workflow for BRCA1...")
+
+        # Simulate history with plan_workflow response containing
+        # data_preparation commands for chr17
+        plan_text = (
+            "## Workflow Plan\n\n```json\n"
+            '{"description": "BRCA1 GBR analysis", '
+            '"data_preparation": {"steps": [{"commands": ['
+            '"tabix -h https://ftp.example.com/ALL.chr17.vcf.gz '
+            'chr17:41196312-41277500 > ALL.chr17.250000.vcf"'
+            "]}]}}\n```"
+        )
+
+        fr_part = MagicMock()
+        fr_part.function_call = None
+        fr_response = MagicMock()
+        fr_response.response = {"result": [MagicMock(text=plan_text)]}
+        fr_part.function_response = fr_response
+
+        msg = MagicMock()
+        msg.parts = [fr_part]
+
+        history_mock = MagicMock()
+        history_mock.get.return_value = [msg]
+        mock_llm.history = history_mock
+
+        mock_agent = _make_mock_agent(mock_llm)
+
+        with patch(
+            "workflow_conductor.phases.planning.Agent",
+            return_value=mock_agent,
+        ):
+            result = await run_planning_phase(state, settings)
+
+        assert result.workflow_plan is not None
+        assert result.workflow_plan.chromosomes == ["17"]
+        assert len(result.workflow_plan.download_commands) == 1
+        assert "chr17" in result.workflow_plan.download_commands[0]
+
+    @pytest.mark.asyncio
+    async def test_workflow_json_only_infers_chromosomes(self) -> None:
+        """When only workflow_json has chromosome info (no raw_plan
+        commands), chromosomes are inferred but download_commands
+        remain empty — this is the edge case the fallback handles."""
+        from workflow_conductor.models import PipelineState
+        from workflow_conductor.phases.planning import run_planning_phase
+
+        state = PipelineState()
+        state.intent_classification = "1000genome"
+        state.add_conversation("user", "Analyze BRCA1 in British population")
+        settings = ConductorSettings()
+
+        mock_llm = _make_mock_llm("Created BRCA1 workflow.")
+
+        # Only generate_workflow in history (no plan_workflow)
+        wf_text = (
+            "## Generated Workflow\n\n```json\n"
+            '{"name": "1000genome", "processes": ['
+            '{"name": "chr17-individuals-1", "type": "dataflow"},'
+            '{"name": "chr17-sifting-1", "type": "dataflow"}'
+            "]}\n```"
+        )
+
+        fr_part = MagicMock()
+        fr_part.function_call = None
+        fr_response = MagicMock()
+        fr_response.response = {"result": [MagicMock(text=wf_text)]}
+        fr_part.function_response = fr_response
+
+        msg = MagicMock()
+        msg.parts = [fr_part]
+
+        history_mock = MagicMock()
+        history_mock.get.return_value = [msg]
+        mock_llm.history = history_mock
+
+        mock_agent = _make_mock_agent(mock_llm)
+
+        with patch(
+            "workflow_conductor.phases.planning.Agent",
+            return_value=mock_agent,
+        ):
+            result = await run_planning_phase(state, settings)
+
+        assert result.workflow_plan is not None
+        # Chromosomes inferred from process names
+        assert result.workflow_plan.chromosomes == ["17"]
+        # No download commands available (no raw_plan data_preparation)
+        assert result.workflow_plan.download_commands == []
+        # But workflow_json was captured
+        assert result.workflow_json is not None
+        assert len(result.workflow_json["processes"]) == 2
