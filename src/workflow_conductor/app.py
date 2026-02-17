@@ -113,6 +113,7 @@ async def run_pipeline(
     dry_run: bool = False,
     auto_approve: bool = False,
     demo: bool = False,
+    no_pause: bool = False,
 ) -> PipelineState:
     """Execute the full 10-phase pipeline.
 
@@ -122,9 +123,16 @@ async def run_pipeline(
 
     If dry_run is True, stops after VALIDATION (Gate 1).
     If demo is True, shows phase explanations and pauses between phases.
+    If no_pause is True, skips 'Press Enter' pauses (non-interactive demo).
     """
     # Store demo flag in settings so completion phase can check it
     settings.demo = demo
+
+    # When no_pause is set, replace demo_pause with a no-op
+    if no_pause:
+        import workflow_conductor.app as _self
+
+        _self.demo_pause = lambda *_a, **_kw: None  # type: ignore[assignment]
 
     state = PipelineState(
         user_prompt=prompt,

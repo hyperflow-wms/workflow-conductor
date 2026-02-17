@@ -107,3 +107,13 @@ class TestGenerateHelmValues:
         cmd_str = cmd[2] if len(cmd) > 2 else ""
         assert ".conductor-ready" in cmd_str
         assert "hflow run workflow.json" in cmd_str
+
+    def test_job_template_uses_hfmaster(self) -> None:
+        settings = ConductorSettings()
+        plan = WorkflowPlan()
+        values = generate_helm_values(settings, plan, namespace="test-ns")
+        engine = values["hyperflow-engine"]
+        job_template = engine["configMap"]["data"]["job-template.yaml"]
+        # Worker jobs use hfmaster (not hfworker) so single-node clusters work
+        assert "hyperflow-wms/nodepool: hfmaster" in job_template
+        assert "hfworker" not in job_template

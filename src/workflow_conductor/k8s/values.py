@@ -64,6 +64,86 @@ def generate_helm_values(
         ),
     ]
 
+    # Job template for HyperFlow worker pods. Overrides the chart default
+    # to use hfmaster nodeSelector (same as engine/NFS/redis) so that
+    # single-node Kind clusters work without a separate hfworker node.
+    job_template = """\
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: job${jobName}
+spec:
+  ttlSecondsAfterFinished: 100
+  template:
+    metadata:
+      labels:
+        app: hyperflow
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: test
+        image: ${containerName}
+        imagePullPolicy: IfNotPresent
+        env:
+          - name: HF_VAR_WORK_DIR
+            value: "${workingDirPath}"
+          - name: HF_VAR_WAIT_FOR_INPUT_FILES
+            value: "0"
+          - name: HF_VAR_NUM_RETRIES
+            value: "1"
+          - name: HF_VAR_ENABLE_TRACING
+            value: "${enableTracing}"
+          - name: HF_VAR_ENABLE_OTEL
+            value: "${enableOtel}"
+          - name: HF_VAR_OT_PARENT_ID
+            value: "${optParentId}"
+          - name: HF_VAR_OT_TRACE_ID
+            value: "${optTraceId}"
+          - name: HF_LOG_NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+          - name: HF_LOG_POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: HF_LOG_POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: HF_LOG_POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+          - name: HF_LOG_POD_SERVICE_ACCOUNT
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.serviceAccountName
+          - name: HF_VAR_FS_MONIT_ENABLED
+            value: "0"
+        command:
+          - "/bin/sh"
+          - "-c"
+          - >
+            ${command}; exitCode=$? ;
+            if [ $exitCode -ne 0 ]; then
+            echo "${command} failed (exit $exitCode)" ;
+            exit 1 ; fi ;
+        workingDir: ${workingDirPath}
+        resources:
+          requests:
+            cpu: ${cpuRequest}
+            memory: ${memRequest}
+        volumeMounts:
+        - name: my-pvc-nfs
+          mountPath: ${volumePath}
+      nodeSelector:
+        hyperflow-wms/nodepool: hfmaster
+      volumes:
+      - name: my-pvc-nfs
+        persistentVolumeClaim:
+          claimName: nfs"""
+
     values: dict[str, Any] = {
         "hyperflow-engine": {
             "containers": {
@@ -98,6 +178,11 @@ def generate_helm_values(
                 # worker-config volume removed: ConfigMap only exists
                 # when workerPools.enabled=true (workerpools-cm.yml)
             ],
+            "configMap": {
+                "data": {
+                    "job-template.yaml": job_template,
+                },
+            },
         },
         "nfs-volume": {
             "pv": {

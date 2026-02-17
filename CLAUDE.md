@@ -38,7 +38,7 @@ uv run pytest tests/unit/test_models.py -v
 uv run pytest tests/unit/test_models.py::test_specific_function -v
 
 # K8s cluster
-make cluster-create       # Create Kind cluster (3 nodes: control-plane + hfmaster + 2x hfworker)
+make cluster-create       # Create Kind cluster (1 worker node, all pods on hfmaster)
 make cluster-delete       # Delete Kind cluster
 make cluster-status       # Show cluster/pod/helm status
 make cluster-load-images  # Load Docker images into Kind
@@ -47,6 +47,8 @@ make cluster-load-images  # Load Docker images into Kind
 make run                  # Default prompt
 make run-dry              # Dry-run (no K8s deployment)
 make run-query Q="..."    # Custom prompt
+make demo                 # Interactive demo (pauses between phases)
+make demo-test            # Non-interactive demo (no pauses, for CI/debugging)
 
 # Cleanup
 make teardown             # Remove Helm releases (keep cluster)
@@ -118,12 +120,25 @@ HF_CONDUCTOR_LLM__DEFAULT_PROVIDER=google
 
 - **After finishing work**: Always commit, create a PR with `@balis` as reviewer
 - **After creating a PR**: Run `/code-review:code-review` to self-review the PR before requesting human review
+- **After successful code review**: Automatically merge the PR (no need to wait for user confirmation)
 - **After merging a PR**: Always create an annotated git tag (e.g., `v0.1.0-models`) so we can return to that project state later
 
 ## Testing Conventions
 
 - **After every PR** (before code review): `make ci` (unit tests + lint + typecheck) + `make test-integration` (K8s tests on Kind, no LLM tokens)
 - **After every completed stage**: `make test-e2e` (full pipeline with real LLM tokens + Kind cluster)
+
+### Demo Testing (`make demo-test`)
+
+When testing the demo, run `make demo-test` (non-interactive, no pauses) in a background shell and spawn a **monitoring sub-agent** that watches the demo output in a loop:
+
+1. **Launch**: Run `make demo-test` in background via Bash tool
+2. **Monitor**: Spawn a sub-agent that periodically tails the output, checking for:
+   - Progress: new phase headers appearing (e.g., `[PROVISIONING]`, `[DEPLOYMENT]`)
+   - Stalls: no new output for >30 seconds
+   - Errors: `failed`, `Error:`, `Traceback`, non-zero exit codes
+3. **On failure/stall**: Stop the demo, investigate (check pod status, events, logs), fix the issue, and re-run `make demo-test` — repeat until the demo completes successfully
+4. **Debug tools**: `kubectl get pods -A`, `kubectl describe pod <name> -n <ns>`, `kubectl get events -n <ns> --sort-by=.lastTimestamp`, `make cluster-status`
 
 ## Implementation Plan
 

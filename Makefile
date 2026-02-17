@@ -11,7 +11,7 @@ TESTS := tests
 
 # K8s
 CLUSTER_NAME ?= hyperflow-test
-KIND_CONFIG := local/kind-config-3n.yaml
+KIND_CONFIG := local/kind-config-1n.yaml
 K8S_DEPLOYMENT_PATH ?= ../../hyperflow-k8s-deployment
 
 # --- Help ---

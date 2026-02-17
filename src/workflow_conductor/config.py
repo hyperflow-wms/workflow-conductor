@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class KubernetesSettings(BaseSettings):
     cluster_name: str = "hyperflow-test"
     cluster_provider: str = "kind"  # "kind" | "k3d" | "existing"
-    kind_config: str = "local/kind-config-3n.yaml"
+    kind_config: str = "local/kind-config-1n.yaml"
     kubeconfig: str = ""
     namespace_prefix: str = "wf-1000g"
 

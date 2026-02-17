@@ -47,7 +47,14 @@ def main(log_level: str) -> None:
     is_flag=True,
     help="Demo mode with explanations and pauses.",
 )
-def run(prompt: str, dry_run: bool, auto_approve: bool, demo: bool) -> None:
+@click.option(
+    "--no-pause",
+    is_flag=True,
+    help="Skip 'Press Enter' pauses in demo mode (non-interactive).",
+)
+def run(
+    prompt: str, dry_run: bool, auto_approve: bool, demo: bool, no_pause: bool
+) -> None:
     """Run the conductor pipeline with a natural language prompt."""
     settings = ConductorSettings()
     asyncio.run(
@@ -57,5 +64,6 @@ def run(prompt: str, dry_run: bool, auto_approve: bool, demo: bool) -> None:
             dry_run=dry_run,
             auto_approve=auto_approve,
             demo=demo,
+            no_pause=no_pause,
         )
     )
