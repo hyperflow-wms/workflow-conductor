@@ -128,6 +128,7 @@ cluster-load-images: cluster-ready ## Load Docker images into Kind cluster
 	kind load docker-image hyperflowwms/hyperflow:latest --name $(CLUSTER_NAME)
 	kind load docker-image hyperflowwms/1000genome-worker:1.0-je1.3.4 --name $(CLUSTER_NAME)
 	kind load docker-image hyperflowwms/1000genome-data:1.0 --name $(CLUSTER_NAME)
+	kind load docker-image broadinstitute/gatk:4.4.0.0 --name $(CLUSTER_NAME) 2>/dev/null || true
 
 .PHONY: docker-pull-images
 docker-pull-images: ## Pull all required Docker images
@@ -135,6 +136,7 @@ docker-pull-images: ## Pull all required Docker images
 	docker pull hyperflowwms/1000genome-worker:1.0-je1.3.4
 	docker pull hyperflowwms/1000genome-data:1.0
 	docker pull hyperflowwms/1000genome-mcp:2.0
+	docker pull broadinstitute/gatk:4.4.0.0
 
 # --- Infrastructure ---
 .PHONY: infra-up
