@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -104,7 +104,8 @@ def generate_report(
     """
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")  # noqa: DTZ005
+    now = datetime.now(UTC)
+    timestamp = now.strftime("%Y%m%d-%H%M%S")
     report_path = REPORT_DIR / f"{case_id}-{timestamp}.md"
 
     status_str = "PASSED" if passed else "FAILED"
@@ -114,7 +115,7 @@ def generate_report(
 
     # Header
     lines.append(f"# E2E Test Report: {case_id}\n")
-    lines.append(f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")  # noqa: DTZ005
+    lines.append(f"**Date:** {now.strftime('%Y-%m-%d %H:%M:%S')} UTC")
     lines.append(f"**Status:** {status_str}")
     lines.append(f"**Execution ID:** {state.execution_id}")
     lines.append(f"**Namespace:** {state.namespace}")

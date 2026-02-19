@@ -29,8 +29,9 @@ make typecheck            # mypy
 # Testing
 make test                 # Unit tests only
 make test-integration     # Integration tests (requires Kind cluster)
-make test-e2e             # End-to-end tests (requires Kind cluster + images)
-make test-all             # All of the above
+make test-e2e             # E2E pipeline tests (requires Kind cluster + images)
+make test-e2e-outputs     # E2E output verification tests (30-90 min each)
+make test-all             # All of the above (excludes test-e2e-outputs)
 make ci                   # lint + typecheck + test
 
 # Run single test
