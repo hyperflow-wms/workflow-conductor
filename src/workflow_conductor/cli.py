@@ -68,7 +68,6 @@ def run(
     """Run the conductor pipeline with a natural language prompt."""
     settings = ConductorSettings()
     if no_teardown:
-        settings.auto_teardown = False
         settings.no_teardown = True
     asyncio.run(
         run_pipeline(
