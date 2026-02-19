@@ -150,17 +150,10 @@ class TestOutputVerification:
             )
 
             # --- Execution assertions ---
-            # Note: K8s job counts are unreliable because
-            # ttlSecondsAfterFinished=100 removes completed jobs before
-            # monitoring polls. The workflow exit code (signal file) is
-            # the authoritative completion indicator, and output file
-            # verification below is the definitive success criterion.
             assert state.execution_summary is not None
-            if state.execution_summary.failed_tasks > 0:
-                logger.warning(
-                    "K8s job counts show %d failed tasks (may be due to TTL cleanup)",
-                    state.execution_summary.failed_tasks,
-                )
+            assert state.execution_summary.failed_tasks == 0, (
+                f"Failed tasks: {state.execution_summary.failed_tasks}"
+            )
 
             # --- Output file verification ---
             assert state.engine_pod_name, "Engine pod name not set"

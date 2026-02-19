@@ -74,7 +74,6 @@ kind: Job
 metadata:
   name: job${jobName}
 spec:
-  ttlSecondsAfterFinished: 100
   template:
     metadata:
       labels:
