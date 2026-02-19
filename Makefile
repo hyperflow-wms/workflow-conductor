@@ -59,7 +59,11 @@ test-integration: cluster-ready ## Run integration tests (requires Kind cluster)
 
 .PHONY: test-e2e
 test-e2e: cluster-ready ## Run E2E tests (requires Kind cluster + images)
-	$(UV) run pytest $(TESTS)/e2e -v --timeout=600
+	$(UV) run pytest $(TESTS)/e2e/test_full_pipeline.py -v --timeout=600
+
+.PHONY: test-e2e-outputs
+test-e2e-outputs: cluster-ready ## Run E2E output verification tests (30-90 min each)
+	$(UV) run pytest $(TESTS)/e2e/test_output_verification.py -v --timeout=4200 -s
 
 .PHONY: test-all
 test-all: test test-integration test-e2e ## Run all tests
