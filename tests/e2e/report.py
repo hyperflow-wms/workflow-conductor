@@ -87,6 +87,115 @@ def _file_table(file_sizes: dict[str, int | None]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _failure_analysis(
+    state: PipelineState,
+    error_message: str,
+    file_sizes: dict[str, int | None],
+    jobs_data: dict[str, Any] | None,
+) -> str:
+    """Analyze why the test failed and suggest possible solutions."""
+    lines: list[str] = []
+    lines.append("## Failure Analysis\n")
+
+    # 1. Root cause from error message
+    lines.append("### Error\n")
+    lines.append(f"```\n{error_message}\n```\n")
+
+    # 2. Failed phases
+    failed_phases = [pr for pr in state.phase_results if pr.status == "failed"]
+    if failed_phases:
+        lines.append("### Failed Phases\n")
+        for pr in failed_phases:
+            lines.append(f"- **{pr.phase}**: {pr.error or 'no error message'}")
+        lines.append("")
+
+    # 3. Pipeline errors (structured)
+    if state.errors:
+        lines.append("### Pipeline Errors\n")
+        for err in state.errors:
+            lines.append(f"- **[{err.phase}] {err.error_type}**: {err.message}")
+            if err.suggested_action:
+                lines.append(f"  - Suggested action: {err.suggested_action}")
+        lines.append("")
+
+    # 4. Failed K8s jobs
+    if jobs_data:
+        failed_jobs = []
+        for job in jobs_data.get("items", []):
+            conditions = job.get("status", {}).get("conditions", [])
+            for c in conditions:
+                if c.get("type") == "Failed" and c.get("status") == "True":
+                    name = job.get("metadata", {}).get("name", "?")
+                    reason = c.get("reason", "Unknown")
+                    msg = c.get("message", "")
+                    failed_jobs.append((name, reason, msg))
+                    break
+        if failed_jobs:
+            lines.append("### Failed K8s Jobs\n")
+            lines.append("| Job | Reason | Message |")
+            lines.append("|---|---|---|")
+            for name, reason, msg in sorted(failed_jobs):
+                lines.append(f"| {name} | {reason} | {msg[:120]} |")
+            lines.append("")
+
+    # 5. Missing/empty output files
+    missing = [f for f, s in file_sizes.items() if s is None]
+    empty = [f for f, s in file_sizes.items() if s == 0]
+    if missing or empty:
+        lines.append("### Output File Issues\n")
+        if missing:
+            lines.append(f"- **Missing files ({len(missing)}):** {', '.join(missing)}")
+        if empty:
+            lines.append(f"- **Empty files ({len(empty)}):** {', '.join(empty)}")
+        lines.append("")
+
+    # 6. Possible solutions
+    lines.append("### Possible Solutions\n")
+
+    if state.workflow_status == "failed":
+        lines.append(
+            "- **Workflow execution failed.** Check the engine logs and failed"
+            " K8s jobs above for the root cause. Common issues:"
+        )
+        lines.append("  - Worker container crashes (OOM, missing dependencies)")
+        lines.append("  - Input data issues (corrupt VCF, missing chromosomes)")
+        lines.append(
+            "  - Resource pressure (insufficient CPU/memory for parallel jobs)"
+        )
+        lines.append("")
+
+    if failed_phases:
+        phase_names = [pr.phase for pr in failed_phases]
+        if "provisioning" in phase_names:
+            lines.append(
+                "- **Provisioning failed.** Check cluster availability,"
+                " Helm chart compatibility, and image pull status."
+            )
+        if "monitoring" in phase_names:
+            lines.append(
+                "- **Monitoring failed.** The workflow may have timed out."
+                " Consider increasing `monitor_timeout` or checking for"
+                " stalled jobs."
+            )
+        if "planning" in phase_names:
+            lines.append(
+                "- **Planning failed.** The LLM may have produced an invalid"
+                " plan. Check MCP server logs and Composer tool responses."
+            )
+        lines.append("")
+
+    if missing:
+        lines.append(
+            "- **Missing output files** indicate that some workflow stages"
+            " did not complete. Cross-reference with failed jobs above to"
+            " identify which pipeline step (sifting, individuals, frequency,"
+            " mutation) failed."
+        )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def generate_report(
     *,
     case_id: str,
@@ -136,6 +245,11 @@ def generate_report(
     lines.append(f"| Workflow status | {state.workflow_status} |")
     lines.append(f"| Pipeline status | {state.status} |")
     lines.append("")
+
+    # Failure analysis (only for failed tests)
+    if not passed and error_message:
+        lines.append(_failure_analysis(state, error_message, file_sizes, jobs_data))
+        lines.append("")
 
     # Infrastructure
     if state.infrastructure:
