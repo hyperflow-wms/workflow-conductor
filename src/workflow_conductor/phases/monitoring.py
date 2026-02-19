@@ -1,10 +1,16 @@
-"""Phase 5: Execution monitoring — poll K8s job status with Rich progress."""
+"""Phase 9: Execution monitoring — watch engine container for completion.
+
+HyperFlow creates K8s jobs dynamically as the workflow DAG progresses.
+Monitoring job counts alone causes early exit (first batch completes before
+the next is created).  Instead, we watch the engine pod's 'hyperflow'
+container: when the engine process exits, the workflow is done.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from workflow_conductor.k8s import Kubectl
 from workflow_conductor.models import PipelinePhase, PipelineState
@@ -16,14 +22,37 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _count_jobs(items: list[dict[str, Any]]) -> tuple[int, int, int]:
+    """Return (total, completed, failed) counts from a jobs list."""
+    total = len(items)
+    completed = sum(
+        1
+        for j in items
+        if any(
+            c.get("type") == "Complete" and c.get("status") == "True"
+            for c in j.get("status", {}).get("conditions", [])
+        )
+    )
+    failed = sum(
+        1
+        for j in items
+        if any(
+            c.get("type") == "Failed" and c.get("status") == "True"
+            for c in j.get("status", {}).get("conditions", [])
+        )
+    )
+    return total, completed, failed
+
+
 async def run_monitoring_phase(
     state: PipelineState,
     settings: ConductorSettings,
 ) -> PipelineState:
-    """Monitor workflow execution by polling K8s job status.
+    """Monitor workflow by watching the HyperFlow engine container.
 
-    Polls at configured intervals until all jobs complete, timeout,
-    or a failure is detected.
+    The engine runs ``hflow run workflow.json``.  When all DAG tasks
+    finish, the process exits (code 0 = success, non-zero = failure).
+    Job counts are polled alongside for progress reporting.
     """
     display_phase_header(PipelinePhase.MONITORING)
 
@@ -32,8 +61,12 @@ async def run_monitoring_phase(
     poll_interval = settings.monitor_poll_interval
     timeout = settings.monitor_timeout
 
+    if not state.engine_pod_name:
+        raise ValueError("Cannot monitor: engine pod not set")
+
     logger.info(
-        "Monitoring namespace=%s, poll=%ds, timeout=%ds",
+        "Monitoring engine pod=%s, namespace=%s, poll=%ds, timeout=%ds",
+        state.engine_pod_name,
         namespace,
         poll_interval,
         timeout,
@@ -41,50 +74,52 @@ async def run_monitoring_phase(
 
     elapsed = 0
     while elapsed < timeout:
-        # Get jobs with hyperflow label
+        engine_done = False
+
+        # Step 1: Check engine container status (definitive signal)
+        try:
+            pod_data = await kubectl.get_json(
+                f"pod/{state.engine_pod_name}",
+                namespace=namespace,
+            )
+            for cs in pod_data.get("status", {}).get("containerStatuses", []):
+                if cs.get("name") != "hyperflow":
+                    continue
+                terminated = cs.get("state", {}).get("terminated")
+                if terminated is not None:
+                    exit_code = terminated.get("exitCode", -1)
+                    reason = terminated.get("reason", "")
+                    logger.info(
+                        "Engine terminated: exit_code=%d, reason=%s",
+                        exit_code,
+                        reason,
+                    )
+                    state.workflow_status = "completed" if exit_code == 0 else "failed"
+                    engine_done = True
+                    break
+        except Exception:
+            logger.warning("Failed to query engine pod status, retrying...")
+
+        # Step 2: Poll job counts for progress reporting
         try:
             jobs_data = await kubectl.get_json(
                 "jobs",
                 namespace=namespace,
                 label_selector="app=hyperflow",
             )
+            total, completed, failed = _count_jobs(jobs_data.get("items", []))
+            state.total_task_count = total
+            state.task_completion_count = completed
+            logger.info(
+                "Jobs: %d/%d completed, %d failed",
+                completed,
+                total,
+                failed,
+            )
         except Exception:
-            logger.warning("Failed to query jobs, retrying...")
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
-            continue
+            logger.warning("Failed to query job counts")
 
-        items = jobs_data.get("items", [])
-        total = len(items)
-        completed = sum(
-            1
-            for j in items
-            if any(
-                c.get("type") == "Complete" and c.get("status") == "True"
-                for c in j.get("status", {}).get("conditions", [])
-            )
-        )
-        failed = sum(
-            1
-            for j in items
-            if any(
-                c.get("type") == "Failed" and c.get("status") == "True"
-                for c in j.get("status", {}).get("conditions", [])
-            )
-        )
-
-        state.total_task_count = total
-        state.task_completion_count = completed
-
-        logger.info(
-            "Jobs: %d/%d completed, %d failed",
-            completed,
-            total,
-            failed,
-        )
-
-        if total > 0 and completed + failed >= total:
-            state.workflow_status = "completed" if failed == 0 else "failed"
+        if engine_done:
             break
 
         await asyncio.sleep(poll_interval)

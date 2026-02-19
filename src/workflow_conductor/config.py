@@ -71,7 +71,7 @@ class ConductorSettings(BaseSettings):
 
     # Docker images
     hf_engine_image: str = "hyperflowwms/hyperflow:latest"
-    worker_image: str = "hyperflowwms/1000genome-worker:1.0-je1.3.4"
+    worker_image: str = "hyperflowwms/1000genome-worker:1.1-latest"
     data_image: str = "hyperflowwms/1000genome-data:1.0"
 
     # Resource quotas
@@ -81,6 +81,7 @@ class ConductorSettings(BaseSettings):
     # Behavior
     auto_approve: bool = False
     auto_teardown: bool = False
+    no_teardown: bool = False
     skip_profiler: bool = True
     verbose: bool = False
     demo: bool = False

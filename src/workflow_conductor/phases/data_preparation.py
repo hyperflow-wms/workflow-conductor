@@ -133,7 +133,12 @@ async def run_data_preparation_phase(
         len(remote_chroms),
     )
 
-    # Step 3: Decompress local data files (chr1-10 from data container)
+    # Step 3: Stage shared files (columns.txt, population lists) and
+    # decompress local VCF files (chr1-10 from data container)
+    stage_shared = (
+        "cp /work_dir/20130502/columns.txt /work_dir/ 2>/dev/null || true && "
+        "cp /work_dir/populations/* /work_dir/ 2>/dev/null || true"
+    )
     if local_chroms:
         logger.info(
             "Step 1: Decompressing local data for chr%s",
@@ -144,17 +149,18 @@ async def run_data_preparation_phase(
             "cd /work_dir/20130502 && "
             f"for f in {chrom_globs}; do "
             '  gunzip -c "$f" > "/work_dir/$(basename $f .gz)" ; '
-            "done && "
-            "cp columns.txt /work_dir/ 2>/dev/null || true && "
-            "cp /work_dir/populations/* /work_dir/ 2>/dev/null || true"
+            f"done && {stage_shared}"
         )
-        await kubectl.exec_in_pod(
-            state.engine_pod_name,
-            ["/bin/sh", "-c", decompress_cmd],
-            namespace=namespace,
-            container="hyperflow",
-            timeout=600,
-        )
+    else:
+        decompress_cmd = stage_shared
+
+    await kubectl.exec_in_pod(
+        state.engine_pod_name,
+        ["/bin/sh", "-c", decompress_cmd],
+        namespace=namespace,
+        container="hyperflow",
+        timeout=600,
+    )
 
     # Step 4: Download remote data files via K8s Job
     if remote_chroms:

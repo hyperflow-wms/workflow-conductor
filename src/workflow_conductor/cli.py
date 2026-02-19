@@ -52,11 +52,24 @@ def main(log_level: str) -> None:
     is_flag=True,
     help="Skip 'Press Enter' pauses in demo mode (non-interactive).",
 )
+@click.option(
+    "--no-teardown",
+    is_flag=True,
+    help="Keep K8s namespace and resources after completion.",
+)
 def run(
-    prompt: str, dry_run: bool, auto_approve: bool, demo: bool, no_pause: bool
+    prompt: str,
+    dry_run: bool,
+    auto_approve: bool,
+    demo: bool,
+    no_pause: bool,
+    no_teardown: bool,
 ) -> None:
     """Run the conductor pipeline with a natural language prompt."""
     settings = ConductorSettings()
+    if no_teardown:
+        settings.auto_teardown = False
+        settings.no_teardown = True
     asyncio.run(
         run_pipeline(
             prompt,

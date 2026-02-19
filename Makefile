@@ -93,6 +93,11 @@ demo-test: ## Run conductor in non-interactive demo mode (no pauses)
 	$(UV) run workflow-conductor run --demo --auto-approve --no-pause \
 		"Analyze BRCA1 gene variants in the British population"
 
+.PHONY: demo-keep
+demo-keep: ## Run demo without teardown (keep K8s resources for inspection)
+	$(UV) run workflow-conductor run --demo --auto-approve --no-pause --no-teardown \
+		"Analyze BRCA1 gene variants in the British population"
+
 .PHONY: run-debug
 run-debug: ## Run conductor in debug mode
 	HF_CONDUCTOR_LOG_LEVEL=DEBUG $(UV) run workflow-conductor run \
@@ -135,7 +140,7 @@ cluster-status: ## Show cluster and pod status
 .PHONY: cluster-load-images
 cluster-load-images: cluster-ready ## Load Docker images into Kind cluster (skips if present)
 	@for img in hyperflowwms/hyperflow:latest \
-	            hyperflowwms/1000genome-worker:1.0-je1.3.4 \
+	            hyperflowwms/1000genome-worker:1.1-latest \
 	            hyperflowwms/1000genome-data:1.0 \
 	            broadinstitute/gatk:4.4.0.0; do \
 		if docker exec $(CLUSTER_NAME)-worker crictl images --no-trunc 2>/dev/null \
@@ -150,7 +155,7 @@ cluster-load-images: cluster-ready ## Load Docker images into Kind cluster (skip
 .PHONY: docker-pull-images
 docker-pull-images: ## Pull all required Docker images
 	docker pull hyperflowwms/hyperflow:latest
-	docker pull hyperflowwms/1000genome-worker:1.0-je1.3.4
+	docker pull hyperflowwms/1000genome-worker:1.1-latest
 	docker pull hyperflowwms/1000genome-data:1.0
 	docker pull hyperflowwms/1000genome-mcp:2.3
 	docker pull broadinstitute/gatk:4.4.0.0
@@ -171,7 +176,7 @@ k3s-install: ## Install k3s (config-driven, persistent storage)
 .PHONY: k3s-pull-images
 k3s-pull-images: ## Pre-pull images into k3s containerd
 	@for img in hyperflowwms/hyperflow:latest \
-	            hyperflowwms/1000genome-worker:1.0-je1.3.4 \
+	            hyperflowwms/1000genome-worker:1.1-latest \
 	            hyperflowwms/1000genome-data:1.0 \
 	            hyperflowwms/1000genome-mcp:2.3 \
 	            broadinstitute/gatk:4.4.0.0; do \
