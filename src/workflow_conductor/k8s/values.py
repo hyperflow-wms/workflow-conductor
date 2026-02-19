@@ -54,6 +54,7 @@ def generate_helm_values(
             "mkdir -p /work_dir/logs-hf ; "
             "echo 'Running workflow:' ; "
             "hflow run workflow.json ; "
+            "echo $? > /work_dir/.workflow-exit-code ; "
             'if [ "$(ls -A /work_dir/logs-hf)" ]; then '
             "  echo 1 > /work_dir/postprocStart ; "
             "else "

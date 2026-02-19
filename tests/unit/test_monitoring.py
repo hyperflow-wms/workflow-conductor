@@ -7,41 +7,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from workflow_conductor.config import ConductorSettings
+from workflow_conductor.k8s.kubectl import KubectlError
 from workflow_conductor.models import PipelineState
 from workflow_conductor.phases.monitoring import _count_jobs
-
-
-def _pod_status(exit_code: int, reason: str = "Completed") -> dict:
-    """Build a pod JSON with a terminated hyperflow container."""
-    return {
-        "status": {
-            "containerStatuses": [
-                {
-                    "name": "hyperflow",
-                    "state": {
-                        "terminated": {
-                            "exitCode": exit_code,
-                            "reason": reason,
-                        }
-                    },
-                }
-            ]
-        }
-    }
-
-
-def _pod_running() -> dict:
-    """Build a pod JSON with a running hyperflow container."""
-    return {
-        "status": {
-            "containerStatuses": [
-                {
-                    "name": "hyperflow",
-                    "state": {"running": {"startedAt": "2026-01-01T00:00:00Z"}},
-                }
-            ]
-        }
-    }
 
 
 def _jobs_response(completed: int = 0, failed: int = 0, active: int = 0) -> dict:
@@ -86,8 +54,8 @@ class TestCountJobs:
 
 class TestMonitoringPhase:
     @pytest.mark.asyncio
-    async def test_detects_engine_completion(self) -> None:
-        """Engine exit code 0 → workflow 'completed'."""
+    async def test_detects_workflow_completion(self) -> None:
+        """Signal file with exit code 0 → workflow 'completed'."""
         from workflow_conductor.phases.monitoring import run_monitoring_phase
 
         state = PipelineState(
@@ -99,14 +67,11 @@ class TestMonitoringPhase:
             monitor_timeout=10,
         )
 
-        def mock_get_json(resource: str, **kwargs: object) -> dict:
-            if resource.startswith("pod/"):
-                return _pod_status(exit_code=0)
-            return _jobs_response(completed=5)
-
         with patch("workflow_conductor.phases.monitoring.Kubectl") as MockKubectl:
             kubectl = MockKubectl.return_value
-            kubectl.get_json = AsyncMock(side_effect=mock_get_json)
+            # exec_in_pod returns "0\n" (exit code file content)
+            kubectl.exec_in_pod = AsyncMock(return_value="0\n")
+            kubectl.get_json = AsyncMock(return_value=_jobs_response(completed=5))
             kubectl.logs = AsyncMock(return_value="done")
 
             result = await run_monitoring_phase(state, settings)
@@ -116,8 +81,8 @@ class TestMonitoringPhase:
         assert result.task_completion_count == 5
 
     @pytest.mark.asyncio
-    async def test_detects_engine_failure(self) -> None:
-        """Engine exit code 1 → workflow 'failed'."""
+    async def test_detects_workflow_failure(self) -> None:
+        """Signal file with exit code 1 → workflow 'failed'."""
         from workflow_conductor.phases.monitoring import run_monitoring_phase
 
         state = PipelineState(
@@ -129,14 +94,12 @@ class TestMonitoringPhase:
             monitor_timeout=10,
         )
 
-        def mock_get_json(resource: str, **kwargs: object) -> dict:
-            if resource.startswith("pod/"):
-                return _pod_status(exit_code=1, reason="Error")
-            return _jobs_response(completed=2, failed=1)
-
         with patch("workflow_conductor.phases.monitoring.Kubectl") as MockKubectl:
             kubectl = MockKubectl.return_value
-            kubectl.get_json = AsyncMock(side_effect=mock_get_json)
+            kubectl.exec_in_pod = AsyncMock(return_value="1\n")
+            kubectl.get_json = AsyncMock(
+                return_value=_jobs_response(completed=2, failed=1)
+            )
             kubectl.logs = AsyncMock(return_value="error")
 
             result = await run_monitoring_phase(state, settings)
@@ -144,8 +107,8 @@ class TestMonitoringPhase:
         assert result.workflow_status == "failed"
 
     @pytest.mark.asyncio
-    async def test_waits_while_engine_running(self) -> None:
-        """Monitoring keeps polling while engine is still running."""
+    async def test_waits_while_signal_file_missing(self) -> None:
+        """Monitoring keeps polling while signal file doesn't exist yet."""
         from workflow_conductor.phases.monitoring import run_monitoring_phase
 
         state = PipelineState(
@@ -157,24 +120,24 @@ class TestMonitoringPhase:
             monitor_timeout=10,
         )
 
-        # First call: engine running, 2/5 jobs done
-        # Second call: engine terminated, 5/5 jobs done
-        call_count = 0
-
-        def mock_get_json(resource: str, **kwargs: object) -> dict:
-            nonlocal call_count
-            call_count += 1
-            if resource.startswith("pod/"):
-                if call_count <= 2:  # first iteration (pod + jobs)
-                    return _pod_running()
-                return _pod_status(exit_code=0)
-            if call_count <= 2:
-                return _jobs_response(completed=2, active=3)
-            return _jobs_response(completed=5)
+        # First two exec_in_pod calls fail (file not found),
+        # third returns exit code 0
+        exec_calls = [
+            KubectlError("cat failed: No such file"),
+            KubectlError("cat failed: No such file"),
+            "0\n",
+        ]
 
         with patch("workflow_conductor.phases.monitoring.Kubectl") as MockKubectl:
             kubectl = MockKubectl.return_value
-            kubectl.get_json = AsyncMock(side_effect=mock_get_json)
+            kubectl.exec_in_pod = AsyncMock(side_effect=exec_calls)
+            kubectl.get_json = AsyncMock(
+                side_effect=[
+                    _jobs_response(completed=2, active=3),
+                    _jobs_response(completed=4, active=1),
+                    _jobs_response(completed=5),
+                ]
+            )
             kubectl.logs = AsyncMock(return_value="done")
 
             result = await run_monitoring_phase(state, settings)
@@ -182,8 +145,7 @@ class TestMonitoringPhase:
         assert result.workflow_status == "completed"
         assert result.total_task_count == 5
         assert result.task_completion_count == 5
-        # Should have polled at least twice
-        assert call_count >= 4
+        assert kubectl.exec_in_pod.call_count == 3
 
     @pytest.mark.asyncio
     async def test_requires_engine_pod(self) -> None:
@@ -197,7 +159,7 @@ class TestMonitoringPhase:
 
     @pytest.mark.asyncio
     async def test_timeout(self) -> None:
-        """Monitoring times out if engine never terminates."""
+        """Monitoring times out if signal file never appears."""
         from workflow_conductor.phases.monitoring import run_monitoring_phase
 
         state = PipelineState(
@@ -211,7 +173,8 @@ class TestMonitoringPhase:
 
         with patch("workflow_conductor.phases.monitoring.Kubectl") as MockKubectl:
             kubectl = MockKubectl.return_value
-            kubectl.get_json = AsyncMock(return_value=_pod_running())
+            kubectl.exec_in_pod = AsyncMock(side_effect=KubectlError("file not found"))
+            kubectl.get_json = AsyncMock(return_value=_jobs_response())
             kubectl.logs = AsyncMock(return_value="")
 
             result = await run_monitoring_phase(state, settings)

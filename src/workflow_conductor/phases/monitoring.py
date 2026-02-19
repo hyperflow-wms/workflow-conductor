@@ -1,9 +1,13 @@
-"""Phase 9: Execution monitoring — watch engine container for completion.
+"""Phase 9: Execution monitoring — watch for workflow completion signal.
 
 HyperFlow creates K8s jobs dynamically as the workflow DAG progresses.
 Monitoring job counts alone causes early exit (first batch completes before
-the next is created).  Instead, we watch the engine pod's 'hyperflow'
-container: when the engine process exits, the workflow is done.
+the next is created).  The engine container itself never terminates (it
+loops with ``while true; sleep 5`` to keep output files accessible).
+
+Instead, the engine command writes a signal file
+``/work_dir/.workflow-exit-code`` after ``hflow run`` exits.  We poll for
+this file via ``kubectl exec``.
 """
 
 from __future__ import annotations
@@ -20,6 +24,9 @@ if TYPE_CHECKING:
     from workflow_conductor.config import ConductorSettings
 
 logger = logging.getLogger(__name__)
+
+# Signal file written by the engine command after hflow exits.
+_WORKFLOW_EXIT_CODE_FILE = "/work_dir/.workflow-exit-code"
 
 
 def _count_jobs(items: list[dict[str, Any]]) -> tuple[int, int, int]:
@@ -48,11 +55,12 @@ async def run_monitoring_phase(
     state: PipelineState,
     settings: ConductorSettings,
 ) -> PipelineState:
-    """Monitor workflow by watching the HyperFlow engine container.
+    """Monitor workflow by polling for the engine exit-code signal file.
 
-    The engine runs ``hflow run workflow.json``.  When all DAG tasks
-    finish, the process exits (code 0 = success, non-zero = failure).
-    Job counts are polled alongside for progress reporting.
+    The engine command writes ``/work_dir/.workflow-exit-code`` after
+    ``hflow run workflow.json`` exits.  The file contains the exit code
+    (0 = success, non-zero = failure).  Job counts are polled alongside
+    for progress reporting.
     """
     display_phase_header(PipelinePhase.MONITORING)
 
@@ -76,29 +84,25 @@ async def run_monitoring_phase(
     while elapsed < timeout:
         engine_done = False
 
-        # Step 1: Check engine container status (definitive signal)
+        # Step 1: Check for workflow exit-code signal file
         try:
-            pod_data = await kubectl.get_json(
-                f"pod/{state.engine_pod_name}",
+            result = await kubectl.exec_in_pod(
+                state.engine_pod_name,
+                ["cat", _WORKFLOW_EXIT_CODE_FILE],
                 namespace=namespace,
+                container="hyperflow",
             )
-            for cs in pod_data.get("status", {}).get("containerStatuses", []):
-                if cs.get("name") != "hyperflow":
-                    continue
-                terminated = cs.get("state", {}).get("terminated")
-                if terminated is not None:
-                    exit_code = terminated.get("exitCode", -1)
-                    reason = terminated.get("reason", "")
-                    logger.info(
-                        "Engine terminated: exit_code=%d, reason=%s",
-                        exit_code,
-                        reason,
-                    )
-                    state.workflow_status = "completed" if exit_code == 0 else "failed"
-                    engine_done = True
-                    break
+            exit_code = int(result.strip())
+            logger.info(
+                "Workflow finished: exit_code=%d",
+                exit_code,
+            )
+            state.workflow_status = "completed" if exit_code == 0 else "failed"
+            engine_done = True
+        except (ValueError, TypeError):
+            logger.warning("Signal file has unexpected content: %r", result)
         except Exception:
-            logger.warning("Failed to query engine pod status, retrying...")
+            pass  # File doesn't exist yet — workflow still running
 
         # Step 2: Poll job counts for progress reporting
         try:
