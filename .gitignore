@@ -39,3 +39,6 @@ mcp_agent.secrets.yaml
 
 # Agent history
 .promts
+
+# E2E test reports
+logs/
