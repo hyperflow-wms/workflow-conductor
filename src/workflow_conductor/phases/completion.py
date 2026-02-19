@@ -47,8 +47,10 @@ async def run_completion_phase(
         total_runtime_seconds=total_runtime,
     )
 
-    # Teardown: always in demo mode, otherwise only if auto_teardown is set
-    should_teardown = settings.demo or settings.auto_teardown
+    # Teardown: demo mode or auto_teardown; --no-teardown overrides both
+    should_teardown = (
+        settings.demo or settings.auto_teardown
+    ) and not settings.no_teardown
     if should_teardown and namespace:
         if settings.demo:
             _console.print(

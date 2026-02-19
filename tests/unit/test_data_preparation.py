@@ -155,12 +155,15 @@ class TestRemoteExtraction:
             kubectl.apply_json = AsyncMock(return_value="job created")
             kubectl.wait_for_job = AsyncMock(return_value="")
             kubectl.exec_in_pod = AsyncMock(
-                return_value="11:9999:ALL.chr11.250000.vcf:ALL.chr11.ann.vcf"
+                side_effect=[
+                    "",  # stage shared files (columns.txt, populations)
+                    "11:9999:ALL.chr11.250000.vcf:ALL.chr11.ann.vcf",  # scan
+                ]
             )
 
             result = await run_data_preparation_phase(state, settings)
 
-        # Should NOT call decompress (no local chroms)
+        # Should call exec_in_pod for staging, then scan
         # Should call apply_json with Job manifest
         kubectl.apply_json.assert_called_once()
         job_manifest = kubectl.apply_json.call_args.args[0]
@@ -244,7 +247,12 @@ class TestRemoteExtraction:
         )
         settings = ConductorSettings()
 
-        with pytest.raises(ValueError, match="require remote extraction"):
+        with (
+            patch("workflow_conductor.phases.data_preparation.Kubectl") as MockKubectl,
+            pytest.raises(ValueError, match="require remote extraction"),
+        ):
+            kubectl = MockKubectl.return_value
+            kubectl.exec_in_pod = AsyncMock(return_value="")
             await run_data_preparation_phase(state, settings)
 
     @pytest.mark.asyncio
@@ -268,7 +276,12 @@ class TestRemoteExtraction:
         )
         settings = ConductorSettings()
 
-        with pytest.raises(ValueError, match="No download commands found"):
+        with (
+            patch("workflow_conductor.phases.data_preparation.Kubectl") as MockKubectl,
+            pytest.raises(ValueError, match="No download commands found"),
+        ):
+            kubectl = MockKubectl.return_value
+            kubectl.exec_in_pod = AsyncMock(return_value="")
             await run_data_preparation_phase(state, settings)
 
 
