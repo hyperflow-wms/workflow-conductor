@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 from mcp_agent.agents.agent import Agent
 from mcp_agent.workflows.llm.augmented_llm import RequestParams
 from mcp_agent.workflows.llm.augmented_llm_anthropic import AnthropicAugmentedLLM
-from mcp_agent.workflows.llm.augmented_llm_google import GoogleAugmentedLLM
 
 from workflow_conductor.models import PipelineState, WorkflowPlan
 
@@ -38,10 +37,14 @@ Use these tools to understand the user's research intent and create
 a comprehensive workflow plan. Always call plan_workflow first, then
 estimate_variants for the relevant regions."""
 
-LLM_FACTORIES: dict[str, type] = {
-    "anthropic": AnthropicAugmentedLLM,
-    "google": GoogleAugmentedLLM,
-}
+
+def _get_llm_class(provider: str) -> type:
+    if provider == "anthropic":
+        return AnthropicAugmentedLLM
+    if provider == "google":
+        from mcp_agent.workflows.llm.augmented_llm_google import GoogleAugmentedLLM  # noqa: PLC0415
+        return GoogleAugmentedLLM
+    raise ValueError(f"Unsupported LLM provider: {provider}")
 
 
 def _parse_plan_from_response(response: str) -> dict[str, Any]:
@@ -187,9 +190,7 @@ async def run_planning_phase(
     generates a workflow plan.
     """
     provider = settings.llm.default_provider
-    llm_class = LLM_FACTORIES.get(provider)
-    if llm_class is None:
-        raise ValueError(f"Unsupported LLM provider: {provider}")
+    llm_class = _get_llm_class(provider)
 
     logger.info("Planning with provider=%s", provider)
 
