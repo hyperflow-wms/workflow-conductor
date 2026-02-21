@@ -120,6 +120,14 @@ class TestSupportingModels:
         )
         assert profile.confidence == 0.0
 
+    def test_resource_profile_expected_duration_default(self) -> None:
+        profile = ResourceProfile(task_type="individuals")
+        assert profile.expected_duration_seconds == 0.0
+
+    def test_resource_profile_with_expected_duration(self) -> None:
+        profile = ResourceProfile(task_type="sifting", expected_duration_seconds=45.0)
+        assert profile.expected_duration_seconds == 45.0
+
     def test_infrastructure_measurements(self) -> None:
         infra = InfrastructureMeasurements(
             namespace="wf-test",

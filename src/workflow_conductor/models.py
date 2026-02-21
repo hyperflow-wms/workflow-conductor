@@ -105,6 +105,7 @@ class ResourceProfile(BaseModel):
     memory_limit: str = ""
     confidence: float = 0.0
     source: str = ""  # "profiler" or "composer"
+    expected_duration_seconds: float = 0.0  # filled by profiler or fallback
 
 
 # --- Supporting Models ---
