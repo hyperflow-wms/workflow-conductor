@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any
 from mcp_agent.agents.agent import Agent
 from mcp_agent.workflows.llm.augmented_llm import RequestParams
 from mcp_agent.workflows.llm.augmented_llm_anthropic import AnthropicAugmentedLLM
-from mcp_agent.workflows.llm.augmented_llm_google import GoogleAugmentedLLM
 
 from workflow_conductor.models import PipelinePhase, PipelineState
 from workflow_conductor.ui.display import display_phase_header
@@ -42,10 +41,14 @@ steps IN ORDER:
 
 You MUST call generate_workflow — do NOT return the workflow JSON yourself."""
 
-LLM_FACTORIES: dict[str, type] = {
-    "anthropic": AnthropicAugmentedLLM,
-    "google": GoogleAugmentedLLM,
-}
+
+def _get_llm_class(provider: str) -> type:
+    if provider == "anthropic":
+        return AnthropicAugmentedLLM
+    if provider == "google":
+        from mcp_agent.workflows.llm.augmented_llm_google import GoogleAugmentedLLM  # noqa: PLC0415
+        return GoogleAugmentedLLM
+    raise ValueError(f"Unsupported LLM provider: {provider}")
 
 
 def _extract_workflow_json(response: str) -> dict[str, Any] | None:
@@ -146,9 +149,7 @@ async def run_generation_phase(
         return state
 
     provider = settings.llm.default_provider
-    llm_class = LLM_FACTORIES.get(provider)
-    if llm_class is None:
-        raise ValueError(f"Unsupported LLM provider: {provider}")
+    llm_class = _get_llm_class(provider)
 
     logger.info("Generating workflow with provider=%s", provider)
 

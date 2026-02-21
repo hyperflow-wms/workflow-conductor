@@ -10,7 +10,11 @@ dependencies = [
     "rich>=13.0",
     "pydantic-settings>=2.0",
     "pyyaml>=6.0",
+    "execution-sentinel",
 ]
+
+[tool.uv.sources]
+execution-sentinel = { path = "../execution-sentinel", editable = true }
 
 [project.optional-dependencies]
 google = ["mcp-agent[google]>=0.2.6"]
