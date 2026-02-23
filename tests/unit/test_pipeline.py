@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -77,8 +78,22 @@ class TestRunPipeline:
     async def test_abort_at_gate2_stops_pipeline(self) -> None:
         """After provisioning+data prep+generation, user aborts at Gate 2."""
         mock_llm = AsyncMock()
-        mock_llm.generate_str.return_value = (
-            '{"description": "test", "chromosomes": ["1"]}'
+        mock_llm.generate_str.return_value = json.dumps(
+            {
+                "description": "test",
+                "chromosomes": ["1"],
+                "populations": ["EUR"],
+                "data_preparation": {
+                    "steps": [
+                        {
+                            "commands": [
+                                "curl -sL https://ex.co/ALL.chr1.vcf.gz"
+                                " | gunzip > /work_dir/ALL.chr1.250000.vcf"
+                            ]
+                        }
+                    ]
+                },
+            }
         )
         history_mock = MagicMock()
         history_mock.get.return_value = []
@@ -89,17 +104,18 @@ class TestRunPipeline:
         mock_agent.__aexit__ = AsyncMock(return_value=False)
         mock_agent.attach_llm = AsyncMock(return_value=mock_llm)
 
-        # Generation phase also needs an Agent mock that returns workflow JSON
-        gen_llm = AsyncMock()
-        gen_llm.generate_str.return_value = (
-            '{"name": "test", "processes": [{"name": "t1"}], "signals": []}'
-        )
-        gen_llm.conversation_history = []
+        # Generation phase calls Agent.call_tool() directly (no LLM)
+        workflow_json = '{"name": "test", "processes": [{"name": "t1"}], "signals": []}'
+        tool_result_text = MagicMock()
+        tool_result_text.text = workflow_json
+        tool_result = MagicMock()
+        tool_result.isError = False
+        tool_result.content = [tool_result_text]
 
         gen_agent = MagicMock()
         gen_agent.__aenter__ = AsyncMock(return_value=gen_agent)
         gen_agent.__aexit__ = AsyncMock(return_value=False)
-        gen_agent.attach_llm = AsyncMock(return_value=gen_llm)
+        gen_agent.call_tool = AsyncMock(return_value=tool_result)
 
         with (
             patch(
@@ -145,10 +161,15 @@ class TestRunPipeline:
             kind.use_context = AsyncMock()
             kind.export_kubeconfig = AsyncMock(return_value="/tmp/mock-kubeconfig.yaml")
 
-            # Set up data preparation mocks
+            # Set up data preparation mocks (all-tabix flow)
             data_prep_kubectl = MockDataPrepKubectl.return_value
+            data_prep_kubectl.apply_json = AsyncMock(return_value="job created")
+            data_prep_kubectl.wait_for_job = AsyncMock(return_value="")
             data_prep_kubectl.exec_in_pod = AsyncMock(
-                side_effect=["", "1:5000:ALL.chr1.250000.vcf:ALL.chr1.ann.vcf"]
+                side_effect=[
+                    "1:5000:ALL.chr1.250000.vcf:ALL.chr1.ann.vcf",
+                    "#CHROM\tPOS\tFORMAT\tS1",
+                ]
             )
 
             state = await run_pipeline(

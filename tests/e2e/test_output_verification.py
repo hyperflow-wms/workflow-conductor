@@ -30,7 +30,7 @@ def no_teardown_settings(e2e_settings: ConductorSettings) -> ConductorSettings:
     return e2e_settings.model_copy(
         update={
             "no_teardown": True,
-            "monitor_timeout": 3000,
+            "monitor_timeout": 36000,  # 10h — not the limiting factor
         },
     )
 
@@ -87,7 +87,7 @@ async def _teardown_namespace(
 
 
 @pytest.mark.e2e
-@pytest.mark.timeout(4200)
+@pytest.mark.timeout(36000)  # 10h — per-case limits are in case.timeout_seconds
 class TestOutputVerification:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

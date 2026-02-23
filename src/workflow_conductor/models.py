@@ -201,6 +201,11 @@ class PipelineState(BaseModel):
     teardown_completed: bool = False
     user_approved_execution: bool = False
 
+    # Data preparation outputs (for generation/deployment phases)
+    vcf_header: str = ""  # #CHROM line from VCF, for columns.txt generation
+    columns_txt: str = ""  # Population-filtered columns.txt content
+    population_files: dict[str, str] = Field(default_factory=dict)
+
     # Phase v2 hooks (populated in later stages)
     resource_profile: dict[str, Any] | None = None  # From profiler (Stage 3)
     cluster_environment: dict[str, Any] | None = None  # From discovery (Stage 7)

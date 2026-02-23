@@ -174,7 +174,7 @@ class TestProvisioningPhase:
 
             await run_provisioning_phase(state_after_validation, settings)
         kind_cluster.create.assert_awaited_once()
-        assert kind_cluster.load_image.await_count == 3
+        assert kind_cluster.load_image.await_count == 2
 
     @pytest.mark.asyncio
     async def test_installs_hf_ops(
