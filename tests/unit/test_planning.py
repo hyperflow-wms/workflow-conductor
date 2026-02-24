@@ -312,9 +312,9 @@ class TestChromosomeInference:
         assert result.workflow_plan.chromosomes == ["17"]
         # No download commands available (no raw_plan data_preparation)
         assert result.workflow_plan.download_commands == []
-        # But workflow_json was captured
-        assert result.workflow_json is not None
-        assert len(result.workflow_json["processes"]) == 2
+        # Workflow JSON is intentionally discarded during planning —
+        # generation phase will regenerate with actual row counts
+        assert result.workflow_json is None
 
     @pytest.mark.asyncio
     async def test_history_fallback_when_text_raw_plan_lacks_commands(

@@ -1,8 +1,23 @@
 # Workflow Conductor — Implementation Plan (Final v7)
 
 > **Generated:** 2026-02-12
-> **Status:** Final merge of v6 final plan + 4-plan debate merged plan, with user-approved decisions on every dimension
+> **Last Updated:** 2026-02-23
+> **Status:** Stages 0–2.6 completed. Stage 2.7 in progress.
 > **Target:** AI-powered orchestrator that accepts natural language genomics research prompts and orchestrates the 1000 Genomes analysis workflow on Kubernetes via HyperFlow WMS.
+
+### Current State (2026-02-23)
+
+**Completed:** Stages 0, 1, 2, 2.5, 2.5.1, 2.6
+**In Progress:** Stage 2.7 — No Data Container + Deterministic Generation
+**Next:** Stage 3 (Resource Profiling)
+
+**Key architectural changes since original plan (Stage 2.7):**
+- **No data container:** The `1000genome-data` Docker image is no longer used. All VCF data is downloaded via tabix K8s Jobs. The `hyperflow-nfs-data` Helm subchart is disabled.
+- **Deterministic generation:** The `generate_workflow` MCP tool is called directly with actual VCF row counts and header. No LLM is involved in the generation phase (no `estimate_variants`).
+- **Population-filtered columns.txt:** The VCF header is passed to `generate_workflow`, which returns a `columns.txt` containing only the requested population samples (e.g., 91 for GBR instead of all 2504).
+- **Init containers disabled:** The Helm chart's `dataPreprocess` init container (which waits for workflow.json from data image) is disabled since the conductor delivers files via `kubectl cp`.
+
+> **Note:** Sections below (§4 Pipeline Flow, §5 Deploy Phase Details, etc.) reflect the original plan. Some details (e.g., "decompress from data container", "estimate_variants") have been superseded by Stage 2.7. See the Stage 2.7 section and `CLAUDE.md` for current architecture.
 
 ---
 
@@ -1458,6 +1473,8 @@ PR 2.7 (Config + fixtures) ──→ PR 2.8 (Integration on Kind) ──→ PR 2
 
 **Why:** The data container (`hyperflowwms/1000genome-data:1.0`) only ships chr1-10. Workers fail with `FileNotFoundError` for chr11+ because no data preparation step existed. The Workflow Composer already generates download commands (tabix/curl) but the Conductor ignored them.
 
+**Note:** Stage 2.7 removed the data container entirely — all chromosomes now use tabix Jobs. The local decompress path from PR 2.12 is no longer used.
+
 **PR Breakdown:**
 
 **PR 2.12: DATA_PREPARATION Phase** (`feature/data-preparation`) → `v0.4.0-data-prep`
@@ -1467,12 +1484,12 @@ PR 2.7 (Config + fixtures) ──→ PR 2.8 (Integration on Kind) ──→ PR 2
 - Simplify deployment to just `kubectl cp` + touch `.conductor-ready`
 - Add `exec_in_pod` and `cp_to_pod` methods to `Kubectl`
 - Remove workflow-json ConfigMap mount (replaced by conductor signal pattern)
-- Add `data_container_chromosomes` config setting (chr1-10)
+- Add `data_container_chromosomes` config setting (chr1-10) — *removed in Stage 2.7*
 - Demo prompt changed from chr22 to chr1
 
 **PR 2.13: Remote Tabix Extraction** (`feature/tabix-extraction`) → `v0.5.0-tabix`
 - Extract `download_commands` from Composer's `raw_plan.data_preparation.steps` in planning phase
-- Split data preparation into local (decompress chr1-10) and remote (K8s Job with `broadinstitute/gatk:4.4.0.0`) paths
+- Split data preparation into local (decompress chr1-10) and remote (K8s Job with `broadinstitute/gatk:4.4.0.0`) paths — *local path removed in Stage 2.7*
 - Add `_filter_commands_for_chromosomes` and `_build_tabix_job` helpers
 - Dynamic NFS PVC sizing based on `estimated_data_size_gb`
 - Add `tabix_image` and `tabix_job_timeout` config settings
@@ -1483,6 +1500,71 @@ PR 2.7 (Config + fixtures) ──→ PR 2.8 (Integration on Kind) ──→ PR 2
 2. `make demo` (chr1) completes with data files decompressed and exact row counts
 3. Remote chromosomes (chr11+) trigger K8s Job with Composer-generated download commands
 4. `WorkflowPlan.download_commands` populated from Composer response
+
+---
+
+### Stage 2.7: No Data Container + Deterministic Generation — IN PROGRESS
+
+**Goal:** Remove the `1000genome-data` Docker image dependency and fix the variant count mismatch bug by making generation deterministic.
+
+**Why:** E2E tests revealed two critical issues:
+1. **Variant count mismatch:** The LLM's `estimate_variants` MCP tool returned full-chromosome counts (~5M for chr6), but data preparation extracted only a region subset (~173K for HLA). Workers crashed trying to process rows beyond actual data size.
+2. **Performance regression:** `frequency.py` processed all 2504 sample columns instead of just the requested population (e.g., 91 GBR samples), making the conductor ~5x slower than upstream.
+
+See `docs/upstream-vs-conductor-comparison.md` for detailed test results.
+
+**Changes:**
+
+**Data Preparation (all-tabix flow):**
+- Remove local decompress path — all chromosomes downloaded via tabix K8s Job (including chr1-10)
+- Remove `data_container_chromosomes` and `data_image` config settings
+- Add VCF header extraction (`#CHROM` line) from downloaded files → `state.vcf_header`
+- Remove 2 images from provisioning: no more loading data image into cluster
+
+**Generation (deterministic):**
+- Replace LLM-based generation with direct `generate_workflow` MCP tool call
+- Pass actual VCF row counts + VCF header to the MCP tool (no `estimate_variants`)
+- Extract population-filtered `columns.txt` from MCP response → `state.columns_txt`
+- Extract population files from MCP response → `state.population_files`
+- New parsers: `_extract_columns_txt()`, `_extract_population_files()`
+
+**Deployment:**
+- Step 2: Deploy `columns.txt` via `kubectl cp` to `/work_dir/columns.txt`
+- Step 3: Deploy population files via `kubectl cp` to `/work_dir/{pop_name}`
+- Step 4 (was Step 2): Signal engine to start
+
+**Helm Values:**
+- Disable `hyperflow-nfs-data` subchart: `"hyperflow-nfs-data": {"enabled": False}`
+- Disable init containers: `"initContainers": {"enabled": False}` (prevents `dataPreprocess` init container from blocking — it waits for workflow.json from data image)
+
+**Models:**
+- Add `vcf_header: str` to `PipelineState`
+- Add `columns_txt: str` to `PipelineState`
+- Add `population_files: dict[str, str]` to `PipelineState`
+
+**E2E Test Timeouts:**
+- brca1-gbr: 1800s (30min)
+- eas-hla-autoimmune: 10800s (3h, upstream ~117min)
+- eur-afr-hla: 18000s (5h, upstream ~253min)
+- brca-breast-cancer: 28800s (8h, 2 chroms × 5 pops)
+- monitor_timeout: 36000s (10h, not limiting factor)
+- pytest class timeout: 36000s (10h)
+
+**E2E Test Results (2026-02-23):**
+- brca1-gbr: **PASSED in 5m19s** (was 17m57s in v1, 3.4x faster)
+  - columns.txt: 91 samples (population-filtered, was 2504)
+  - Monitoring: 3m31s (was 15m10s)
+  - All 16/16 tasks completed, 0 failed
+  - All 4 output files present and non-empty
+- eas-hla-autoimmune: pending
+- eur-afr-hla: pending
+
+**Acceptance Criteria:**
+1. `make ci` passes (212+ unit tests, lint, typecheck)
+2. brca1-gbr E2E: PASSED, monitoring time ≤5min (was 15min)
+3. eas-hla-autoimmune E2E: PASSED, variant counts match actual data
+4. columns.txt has only requested population samples (e.g., 91 for GBR, not 2504)
+5. No `1000genome-data` Docker image dependency
 
 ---
 

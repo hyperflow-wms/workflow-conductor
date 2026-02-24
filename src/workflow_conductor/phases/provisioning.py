@@ -1,7 +1,7 @@
-"""Provisioning phase: infrastructure setup, data staging, and measurements.
+"""Provisioning phase: infrastructure setup and measurements.
 
 Sets up Kind cluster, installs hf-ops and hf-run Helm charts, waits for
-engine pod and nfs-data job, and queries infrastructure measurements.
+engine pod readiness, and queries infrastructure measurements.
 """
 
 from __future__ import annotations
@@ -43,8 +43,7 @@ async def run_provisioning_phase(
     3. Create ResourceQuota
     4. Install hf-run (engine waits for conductor signal)
     5. Wait for engine pod readiness
-    6. Wait for nfs-data job (data container staging)
-    7. Query cluster for infrastructure measurements
+    6. Query cluster for infrastructure measurements
     """
     display_phase_header(PipelinePhase.PROVISIONING)
 
@@ -61,7 +60,6 @@ async def run_provisioning_phase(
             await asyncio.gather(
                 cluster.load_image(settings.hf_engine_image, skip_check=True),
                 cluster.load_image(settings.worker_image, skip_check=True),
-                cluster.load_image(settings.data_image, skip_check=True),
             )
 
         # Always export Kind kubeconfig for Kind clusters — the system's
@@ -150,12 +148,8 @@ async def run_provisioning_phase(
     state.engine_pod_name = pod_name
     logger.info("Engine pod ready: %s", pod_name)
 
-    # Step 6: Wait for nfs-data job (data container staging)
-    logger.info("Step 6: Waiting for nfs-data job to complete")
-    await kubectl.wait_for_job("nfs-data", namespace=namespace, timeout=300)
-
-    # Step 7: Query infrastructure measurements
-    logger.info("Step 7: Querying infrastructure measurements")
+    # Step 6: Query infrastructure measurements
+    logger.info("Step 6: Querying infrastructure measurements")
     node_info = await kubectl.get_nodes()
     state.infrastructure = InfrastructureMeasurements(
         namespace=namespace,

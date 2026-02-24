@@ -36,7 +36,7 @@ EAS_HLA_AUTOIMMUNE = E2ETestCase(
         "chr6-EAS.tar.gz",
         "chr6-EAS-freq.tar.gz",
     ],
-    timeout_seconds=1800,
+    timeout_seconds=10800,  # 3h (upstream ~117min)
 )
 
 # Case 5: EUR vs AFR HLA comparison
@@ -56,7 +56,7 @@ EUR_AFR_HLA = E2ETestCase(
         "chr6-AFR.tar.gz",
         "chr6-AFR-freq.tar.gz",
     ],
-    timeout_seconds=2400,
+    timeout_seconds=18000,  # 5h (upstream ~253min)
 )
 
 # Case 6: BRCA1/BRCA2 multi-population breast cancer
@@ -95,7 +95,7 @@ BRCA_BREAST_CANCER = E2ETestCase(
         "chr17-SAS.tar.gz",
         "chr17-SAS-freq.tar.gz",
     ],
-    timeout_seconds=3600,
+    timeout_seconds=28800,  # 8h (2 chroms x 5 pops)
 )
 
 # Case 7: BRCA1 British population

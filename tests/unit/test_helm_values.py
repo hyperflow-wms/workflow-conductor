@@ -37,11 +37,12 @@ class TestGenerateHelmValues:
         assert any(v["name"] == "config-map" for v in vols)
         assert not any(v["name"] == "worker-config" for v in vols)
 
-    def test_data_image(self) -> None:
+    def test_nfs_data_disabled(self) -> None:
+        """Data container disabled — subchart explicitly turned off."""
         settings = ConductorSettings()
         plan = WorkflowPlan()
         values = generate_helm_values(settings, plan, namespace="test-ns")
-        assert values["hyperflow-nfs-data"]["workflow"]["image"] == settings.data_image
+        assert values["hyperflow-nfs-data"]["enabled"] is False
 
     def test_with_resource_profiles(self) -> None:
         settings = ConductorSettings()

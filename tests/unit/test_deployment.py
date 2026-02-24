@@ -55,6 +55,7 @@ class TestDeploymentPhase:
 
             result = await run_deployment_phase(state, settings)
 
+        # workflow.json only (no columns.txt or pop files)
         kubectl.cp_to_pod.assert_called_once()
         kubectl.exec_in_pod.assert_called_once()
         # Verify signal command
@@ -121,3 +122,56 @@ class TestDeploymentPhase:
         cp_call = kubectl.cp_to_pod.call_args
         assert cp_call.args[2] == "/work_dir/workflow.json"
         assert result.workflow_json_path != ""
+
+    @pytest.mark.asyncio
+    async def test_deployment_copies_columns_txt(self) -> None:
+        from workflow_conductor.phases.deployment import run_deployment_phase
+
+        state = _make_state(
+            columns_txt="#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG00096",
+        )
+        settings = ConductorSettings(
+            kubernetes={"cluster_provider": "existing"},
+        )
+
+        with patch("workflow_conductor.phases.deployment.Kubectl") as MockKubectl:
+            kubectl = MockKubectl.return_value
+            kubectl.cp_to_pod = AsyncMock()
+            kubectl.exec_in_pod = AsyncMock()
+
+            await run_deployment_phase(state, settings)
+
+        # workflow.json + columns.txt = 2 cp_to_pod calls
+        assert kubectl.cp_to_pod.call_count == 2
+        cp_calls = kubectl.cp_to_pod.call_args_list
+        destinations = [call.args[2] for call in cp_calls]
+        assert "/work_dir/workflow.json" in destinations
+        assert "/work_dir/columns.txt" in destinations
+
+    @pytest.mark.asyncio
+    async def test_deployment_copies_population_files(self) -> None:
+        from workflow_conductor.phases.deployment import run_deployment_phase
+
+        state = _make_state(
+            columns_txt="#CHROM\tPOS\tFORMAT\tHG00096",
+            population_files={"GBR": "HG00096\nHG00097", "FIN": "HG00171"},
+        )
+        settings = ConductorSettings(
+            kubernetes={"cluster_provider": "existing"},
+        )
+
+        with patch("workflow_conductor.phases.deployment.Kubectl") as MockKubectl:
+            kubectl = MockKubectl.return_value
+            kubectl.cp_to_pod = AsyncMock()
+            kubectl.exec_in_pod = AsyncMock()
+
+            await run_deployment_phase(state, settings)
+
+        # workflow.json + columns.txt + 2 population files = 4 cp_to_pod calls
+        assert kubectl.cp_to_pod.call_count == 4
+        cp_calls = kubectl.cp_to_pod.call_args_list
+        destinations = [call.args[2] for call in cp_calls]
+        assert "/work_dir/workflow.json" in destinations
+        assert "/work_dir/columns.txt" in destinations
+        assert "/work_dir/GBR" in destinations
+        assert "/work_dir/FIN" in destinations
