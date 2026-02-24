@@ -43,18 +43,32 @@ def _extract_columns_txt(response: str) -> str:
 def _extract_population_files(response: str) -> dict[str, str]:
     """Extract population file contents from MCP tool response.
 
-    Looks for markdown sections like:
+    Looks for a "Population Files" section containing entries like:
         **GBR** (91 individuals):
         ```
         HG00096
         HG00097
         ...
         ```
+
+    Only parses entries after a "Population Files" header to avoid matching
+    other bold text in the response.
     """
+    # Find the Population Files section
+    section_match = re.search(
+        r"#+\s*Population\s+Files\s*\n(.*)",
+        response,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not section_match:
+        return {}
+
+    section_text = section_match.group(1)
+
     result: dict[str, str] = {}
     for match in re.finditer(
         r"\*\*(\w+)\*\*\s*\([^)]*\):\s*\n```[^\n]*\n(.*?)\n```",
-        response,
+        section_text,
         re.DOTALL,
     ):
         pop_name = match.group(1)
@@ -219,7 +233,7 @@ async def run_generation_phase(
             "Could not extract workflow JSON from generate_workflow response"
         )
 
-    # Extract columns.txt and population files when vcf_header was provided
+    # Extract columns.txt when vcf_header was provided
     if state.vcf_header:
         columns_txt = _extract_columns_txt(response_text)
         if columns_txt:
@@ -231,16 +245,21 @@ async def run_generation_phase(
                 max(0, col_count - 9),
             )
         else:
-            logger.warning("vcf_header was provided but no columns.txt in response")
+            raise RuntimeError(
+                "vcf_header was provided but no columns.txt found in "
+                "generate_workflow response — workers require columns.txt"
+            )
 
-        pop_files = _extract_population_files(response_text)
-        if pop_files:
-            state.population_files = pop_files
-            for name, content in pop_files.items():
-                logger.info(
-                    "Extracted population file: %s (%d individuals)",
-                    name,
-                    len(content.splitlines()),
-                )
+    # Extract population files unconditionally — MCP returns them regardless
+    # of vcf_header, and workers need them for frequency analysis
+    pop_files = _extract_population_files(response_text)
+    if pop_files:
+        state.population_files = pop_files
+        for name, content in pop_files.items():
+            logger.info(
+                "Extracted population file: %s (%d individuals)",
+                name,
+                len(content.splitlines()),
+            )
 
     return state

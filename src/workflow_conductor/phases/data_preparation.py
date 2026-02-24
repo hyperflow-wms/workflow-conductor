@@ -112,12 +112,12 @@ async def run_data_preparation_phase(
     kubectl = Kubectl(kubeconfig=settings.kubernetes.kubeconfig)
     namespace = state.namespace
 
-    # Step 1: Determine needed chromosomes from workflow plan
+    # Determine needed chromosomes from workflow plan
     chromosomes = state.workflow_plan.chromosomes if state.workflow_plan else []
     if not chromosomes:
         raise ValueError("No chromosomes specified in workflow plan")
 
-    # Step 2: Download data files via K8s Job
+    # Download data files via K8s Job
     download_commands = (
         state.workflow_plan.download_commands if state.workflow_plan else []
     )
@@ -148,7 +148,7 @@ async def run_data_preparation_phase(
         timeout=settings.tabix_job_timeout,
     )
 
-    # Step 3: Discover VCF files and scan for exact row counts.
+    # Discover VCF files and scan for exact row counts.
     # File naming varies by Composer version (e.g. ALL.chr17.250000.vcf vs
     # ALL.chr17.brca1.vcf), so we discover them dynamically.
     logger.info("Step 2: Scanning VCF files for row counts")
@@ -171,7 +171,7 @@ async def run_data_preparation_phase(
         timeout=300,
     )
 
-    # Step 4: Parse output → chromosome_data
+    # Parse output → chromosome_data
     # Format: "17:1234:ALL.chr17.brca1.vcf:ALL.chr17.brca1.annotation.vcf"
     state.chromosome_data = []
     for line in output.strip().splitlines():
@@ -201,7 +201,7 @@ async def run_data_preparation_phase(
     if not state.chromosome_data:
         raise ValueError("No chromosome data could be scanned from VCF files")
 
-    # Step 5: Extract VCF header from the first VCF for columns.txt generation.
+    # Extract VCF header from the first VCF for columns.txt generation.
     # The #CHROM line contains all sample IDs, which the generation phase uses
     # to create a population-filtered columns.txt.
     first_vcf = state.chromosome_data[0].vcf_file

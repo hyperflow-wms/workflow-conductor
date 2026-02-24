@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import tempfile
 from typing import TYPE_CHECKING
 
@@ -70,6 +71,7 @@ async def run_deployment_phase(
             namespace=namespace,
             container="hyperflow",
         )
+        os.unlink(state.workflow_json_path)
 
     # Step 2: Write columns.txt (population-filtered)
     if state.columns_txt:
@@ -88,6 +90,7 @@ async def run_deployment_phase(
             namespace=namespace,
             container="hyperflow",
         )
+        os.unlink(columns_path)
 
     # Step 3: Write population files
     if state.population_files:
@@ -109,6 +112,7 @@ async def run_deployment_phase(
                 namespace=namespace,
                 container="hyperflow",
             )
+            os.unlink(pop_path)
             logger.info("  Deployed %s", pop_name)
 
     # Step 4: Signal engine to start

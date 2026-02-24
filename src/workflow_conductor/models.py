@@ -85,8 +85,8 @@ class InfrastructureMeasurements(BaseModel):
 class ChromosomeData(BaseModel):
     """Per-chromosome data for workflow generation.
 
-    Feeds into the Composer's generate_workflow tool. Row counts may be
-    estimated (via estimate_variants) or exact (from staged file scanning).
+    Feeds into the Composer's generate_workflow tool. Row counts are
+    exact — scanned from VCF files during data preparation.
     """
 
     vcf_file: str

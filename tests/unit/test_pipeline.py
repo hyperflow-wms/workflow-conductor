@@ -105,9 +105,15 @@ class TestRunPipeline:
         mock_agent.attach_llm = AsyncMock(return_value=mock_llm)
 
         # Generation phase calls Agent.call_tool() directly (no LLM)
+        # Response must include columns.txt when vcf_header is provided
         workflow_json = '{"name": "test", "processes": [{"name": "t1"}], "signals": []}'
+        mcp_response = (
+            "### columns.txt (1 individuals)\n"
+            "```\n#CHROM\tPOS\tFORMAT\tS1\n```\n\n"
+            f"### Workflow JSON\n```json\n{workflow_json}\n```"
+        )
         tool_result_text = MagicMock()
-        tool_result_text.text = workflow_json
+        tool_result_text.text = mcp_response
         tool_result = MagicMock()
         tool_result.isError = False
         tool_result.content = [tool_result_text]

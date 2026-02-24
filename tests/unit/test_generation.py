@@ -300,7 +300,13 @@ class TestGenerationPhase:
         state_after_provisioning.vcf_header = (
             "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG00096"
         )
-        response = json.dumps(SAMPLE_WORKFLOW_JSON)
+        columns_content = (
+            "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG00096"
+        )
+        response = (
+            f"### columns.txt (1 individuals)\n```\n{columns_content}\n```\n\n"
+            f"### Workflow JSON\n```json\n{json.dumps(SAMPLE_WORKFLOW_JSON)}\n```"
+        )
         agent = _mock_agent_with_tool_result(response)
 
         with patch("workflow_conductor.phases.generation.Agent", return_value=agent):
@@ -386,6 +392,50 @@ class TestGenerationPhase:
         assert "EUR" in result.population_files
         assert "HG00096" in result.population_files["EUR"]
         assert "HG00097" in result.population_files["EUR"]
+
+    @pytest.mark.asyncio
+    async def test_raises_when_vcf_header_but_no_columns_txt(
+        self,
+        state_after_provisioning: PipelineState,
+        settings: ConductorSettings,
+    ) -> None:
+        """RuntimeError when vcf_header provided but response has no columns.txt."""
+        state_after_provisioning.vcf_header = (
+            "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG00096"
+        )
+        response = json.dumps(SAMPLE_WORKFLOW_JSON)
+        agent = _mock_agent_with_tool_result(response)
+
+        with patch("workflow_conductor.phases.generation.Agent", return_value=agent):
+            from workflow_conductor.phases.generation import run_generation_phase
+
+            with pytest.raises(RuntimeError, match="no columns.txt found"):
+                await run_generation_phase(state_after_provisioning, settings)
+
+    @pytest.mark.asyncio
+    async def test_extracts_pop_files_without_vcf_header(
+        self,
+        state_after_provisioning: PipelineState,
+        settings: ConductorSettings,
+    ) -> None:
+        """Population files extracted even when vcf_header is empty."""
+        state_after_provisioning.vcf_header = ""
+        markdown_response = (
+            "### Population Files\n\n"
+            "**GBR** (91 individuals):\n"
+            "```\nHG00096\nHG00097\n```\n\n"
+            "### Workflow JSON\n"
+            f"```json\n{json.dumps(SAMPLE_WORKFLOW_JSON)}\n```"
+        )
+        agent = _mock_agent_with_tool_result(markdown_response)
+
+        with patch("workflow_conductor.phases.generation.Agent", return_value=agent):
+            from workflow_conductor.phases.generation import run_generation_phase
+
+            result = await run_generation_phase(state_after_provisioning, settings)
+
+        assert "GBR" in result.population_files
+        assert "HG00096" in result.population_files["GBR"]
 
     @pytest.mark.asyncio
     async def test_overwrites_planning_phase_workflow(
