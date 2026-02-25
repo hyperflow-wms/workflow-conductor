@@ -42,3 +42,4 @@ mcp_agent.secrets.yaml
 
 # E2E test reports
 logs/
+uv.lock

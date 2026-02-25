@@ -1,13 +1,9 @@
 """Phase 9: Execution monitoring — watch for workflow completion signal.
 
-HyperFlow creates K8s jobs dynamically as the workflow DAG progresses.
-Monitoring job counts alone causes early exit (first batch completes before
-the next is created).  The engine container itself never terminates (it
-loops with ``while true; sleep 5`` to keep output files accessible).
-
-Instead, the engine command writes a signal file
-``/work_dir/.workflow-exit-code`` after ``hflow run`` exits.  We poll for
-this file via ``kubectl exec``.
+Delegates all monitoring logic to the `execution-sentinel` package via
+``Sentinel.watch()``.  The Sentinel detects OOMKills, stragglers,
+mass-failure escalation, and connectivity loss, streaming ``SentinelReport``
+objects into a queue that is drained here and rendered via Rich.
 """
 
 from __future__ import annotations
@@ -16,7 +12,15 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
-from workflow_conductor.k8s import Kubectl
+from execution_sentinel.config import SentinelSettings
+from execution_sentinel.models import MonitoringContext, SentinelReport, TaskSpec
+from execution_sentinel.sentinel import Sentinel
+from execution_sentinel.ui.display import (
+    display_completion_summary,
+    display_report,
+    display_sentinel_banner,
+)
+
 from workflow_conductor.models import PipelinePhase, PipelineState
 from workflow_conductor.ui.display import display_phase_header
 
@@ -25,124 +29,164 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Signal file written by the engine command after hflow exits.
-_WORKFLOW_EXIT_CODE_FILE = "/work_dir/.workflow-exit-code"
+# Known 1000 Genomes task ordering and default durations
+_1000G_TASK_ORDER: dict[str, int] = {
+    "individuals": 0,
+    "individuals_merge": 1,
+    "sifting": 2,
+    "mutation_overlap": 3,
+    "frequency": 4,
+}
+_1000G_TASK_DEPS: dict[str, list[str]] = {
+    "individuals": [],
+    "individuals_merge": ["individuals"],
+    "sifting": ["individuals_merge"],
+    "mutation_overlap": ["sifting"],
+    "frequency": ["sifting"],
+}
+_1000G_DEFAULT_DURATIONS: dict[str, float] = {
+    "individuals": 30.0,
+    "individuals_merge": 10.0,
+    "sifting": 45.0,
+    "mutation_overlap": 20.0,
+    "frequency": 15.0,
+}
 
 
-def _count_jobs(items: list[dict[str, Any]]) -> tuple[int, int, int]:
-    """Return (total, completed, failed) counts from a jobs list."""
-    total = len(items)
-    completed = sum(
-        1
-        for j in items
-        if any(
-            c.get("type") == "Complete" and c.get("status") == "True"
-            for c in j.get("status", {}).get("conditions", [])
+# TODO: re-enable when hf-engine K8s service name/port confirmed from Helm charts
+# def _build_hyperflow_endpoint(state: PipelineState) -> str:
+#     if state.namespace:
+#         return f"http://hf-engine.{state.namespace}.svc.cluster.local:8080"
+#     return ""
+
+
+def _build_monitoring_context(state: PipelineState) -> MonitoringContext:
+    profile_by_type = {p.task_type: p for p in state.resource_profiles}
+    task_inventory = []
+    for proc in (state.workflow_json or {}).get("processes", []):
+        task_type = proc.get("fun", "")
+        profile = profile_by_type.get(task_type)
+        dag_order = _1000G_TASK_ORDER.get(task_type, 99)
+        expected_duration = (
+            profile.expected_duration_seconds
+            if (profile and profile.expected_duration_seconds > 0)
+            else _1000G_DEFAULT_DURATIONS.get(task_type, 0.0)
         )
-    )
-    failed = sum(
-        1
-        for j in items
-        if any(
-            c.get("type") == "Failed" and c.get("status") == "True"
-            for c in j.get("status", {}).get("conditions", [])
+        task_inventory.append(
+            TaskSpec(
+                name=proc.get("name", ""),
+                task_type=task_type,
+                memory_limit=profile.memory_limit if profile else "",
+                cpu_limit=profile.cpu_limit if profile else "",
+                dag_order=dag_order,
+                expected_duration_seconds=expected_duration,
+            )
         )
+    return MonitoringContext(
+        namespace=state.namespace,
+        engine_pod_name=state.engine_pod_name,
+        engine_container="hyperflow",
+        task_inventory=task_inventory,
+        dag_structure=_1000G_TASK_DEPS,
+        # hyperflow_api_endpoint=_build_hyperflow_endpoint(state),  # TODO: re-enable when confirmed
     )
-    return total, completed, failed
+
+
+async def _translate_to_nl(report: SentinelReport, settings: "ConductorSettings") -> str:
+    """Translate a Sentinel report into a science-friendly sentence for the user."""
+    try:
+        import anthropic  # type: ignore[import-untyped]
+
+        client = anthropic.AsyncAnthropic()
+        prompt = (
+            f"You are an AI assistant helping a genomics researcher. "
+            f"Translate this Kubernetes workflow monitoring event into one clear, "
+            f"science-friendly sentence (no Kubernetes jargon).\n"
+            f"Event: kind={report.kind}, message={report.message!r}, "
+            f"progress={report.completed_tasks}/{report.total_tasks}."
+        )
+        response = await client.messages.create(
+            model=settings.llm.anthropic_model,
+            max_tokens=100,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text.strip()  # type: ignore[index]
+    except Exception:  # noqa: BLE001
+        return report.message
 
 
 async def run_monitoring_phase(
     state: PipelineState,
     settings: ConductorSettings,
 ) -> PipelineState:
-    """Monitor workflow by polling for the engine exit-code signal file.
+    """Monitor workflow execution via Execution Sentinel.
 
-    The engine command writes ``/work_dir/.workflow-exit-code`` after
-    ``hflow run workflow.json`` exits.  The file contains the exit code
-    (0 = success, non-zero = failure).  Job counts are polled alongside
-    for progress reporting.
+    Delegates to ``Sentinel.watch()`` which handles OOMKill detection,
+    straggler detection, mass-failure escalation, and connectivity loss.
     """
     display_phase_header(PipelinePhase.MONITORING)
-
-    kubectl = Kubectl(kubeconfig=settings.kubernetes.kubeconfig)
-    namespace = state.namespace
-    poll_interval = settings.monitor_poll_interval
-    timeout = settings.monitor_timeout
 
     if not state.engine_pod_name:
         raise ValueError("Cannot monitor: engine pod not set")
 
+    context = _build_monitoring_context(state)
+    sentinel_settings = SentinelSettings(
+        kubeconfig=settings.kubernetes.kubeconfig,
+        poll_interval=settings.monitor_poll_interval,
+        timeout=settings.monitor_timeout,
+    )
+    sentinel = Sentinel(context, sentinel_settings)
+
     logger.info(
-        "Monitoring engine pod=%s, namespace=%s, poll=%ds, timeout=%ds",
-        state.engine_pod_name,
-        namespace,
-        poll_interval,
-        timeout,
+        "Starting Execution Sentinel: namespace=%s, engine_pod=%s, "
+        "poll=%ds, timeout=%ds, expected_tasks=%d",
+        context.namespace,
+        context.engine_pod_name,
+        sentinel_settings.poll_interval,
+        sentinel_settings.timeout,
+        context.total_expected_tasks,
     )
 
-    elapsed = 0
-    while elapsed < timeout:
-        engine_done = False
+    display_sentinel_banner(context.namespace, context.total_expected_tasks)
 
-        # Step 1: Check for workflow exit-code signal file
-        try:
-            result = await kubectl.exec_in_pod(
-                state.engine_pod_name,
-                ["cat", _WORKFLOW_EXIT_CODE_FILE],
-                namespace=namespace,
-                container="hyperflow",
-            )
-            exit_code = int(result.strip())
-            logger.info(
-                "Workflow finished: exit_code=%d",
-                exit_code,
-            )
-            state.workflow_status = "completed" if exit_code == 0 else "failed"
-            engine_done = True
-        except (ValueError, TypeError):
-            logger.warning("Signal file has unexpected content: %r", result)
-        except Exception:
-            pass  # File doesn't exist yet — workflow still running
+    async def _drain() -> None:
+        while True:
+            report = await sentinel.reports.get()
+            report.nl_message = await _translate_to_nl(report, settings)
+            display_report(report)
 
-        # Step 2: Poll job counts for progress reporting
-        try:
-            jobs_data = await kubectl.get_json(
-                "jobs",
-                namespace=namespace,
-                label_selector="app=hyperflow",
-            )
-            total, completed, failed = _count_jobs(jobs_data.get("items", []))
-            state.total_task_count = total
-            state.task_completion_count = completed
-            logger.info(
-                "Jobs: %d/%d completed, %d failed",
-                completed,
-                total,
-                failed,
-            )
-        except Exception:
-            logger.warning("Failed to query job counts")
+    drain_task = asyncio.create_task(_drain())
+    summary = await sentinel.watch()
+    drain_task.cancel()
 
-        if engine_done:
-            break
+    # Flush any reports produced in the final iteration
+    while not sentinel.reports.empty():
+        display_report(sentinel.reports.get_nowait())
 
-        await asyncio.sleep(poll_interval)
-        elapsed += poll_interval
-    else:
+    display_completion_summary(summary)
+
+    # Map WatchSummary → PipelineState
+    state.task_completion_count = summary.completed_tasks
+    state.total_task_count = summary.total_tasks or len(context.task_inventory)
+    if summary.timed_out:
         state.workflow_status = "timeout"
-        logger.warning("Monitoring timed out after %ds", timeout)
+    elif summary.mass_failure or (
+        summary.exit_code is not None and summary.exit_code != 0
+    ):
+        state.workflow_status = "failed"
+    else:
+        state.workflow_status = "completed"
 
-    # Capture engine logs
-    if state.engine_pod_name:
-        try:
-            logs = await kubectl.logs(
-                state.engine_pod_name,
-                namespace=namespace,
-                container="hyperflow",
-                tail=100,
-            )
-            logger.debug("Engine logs (last 100 lines):\n%s", logs)
-        except Exception:
-            logger.warning("Failed to capture engine logs")
+    # Capture engine logs via sentinel's kubectl client
+    try:
+        logs = await sentinel.kubectl.logs(
+            state.engine_pod_name,
+            namespace=state.namespace,
+            container="hyperflow",
+            tail=100,
+        )
+        logger.debug("Engine logs (last 100 lines):\n%s", logs)
+    except Exception:
+        logger.warning("Failed to capture engine logs")
 
     return state
