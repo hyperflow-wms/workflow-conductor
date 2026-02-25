@@ -85,8 +85,8 @@ class InfrastructureMeasurements(BaseModel):
 class ChromosomeData(BaseModel):
     """Per-chromosome data for workflow generation.
 
-    Feeds into the Composer's generate_workflow tool. Row counts may be
-    estimated (via estimate_variants) or exact (from staged file scanning).
+    Feeds into the Composer's generate_workflow tool. Row counts are
+    exact — scanned from VCF files during data preparation.
     """
 
     vcf_file: str
@@ -201,6 +201,11 @@ class PipelineState(BaseModel):
     total_task_count: int = 0
     teardown_completed: bool = False
     user_approved_execution: bool = False
+
+    # Data preparation outputs (for generation/deployment phases)
+    vcf_header: str = ""  # #CHROM line from VCF, for columns.txt generation
+    columns_txt: str = ""  # Population-filtered columns.txt content
+    population_files: dict[str, str] = Field(default_factory=dict)
 
     # Phase v2 hooks (populated in later stages)
     resource_profile: dict[str, Any] | None = None  # From profiler (Stage 3)

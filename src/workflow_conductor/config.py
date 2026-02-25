@@ -72,7 +72,6 @@ class ConductorSettings(BaseSettings):
     # Docker images
     hf_engine_image: str = "hyperflowwms/hyperflow:latest"
     worker_image: str = "hyperflowwms/1000genome-worker:1.1-latest"
-    data_image: str = "hyperflowwms/1000genome-data:1.0"
 
     # Resource quotas
     resource_quota_cpu: str = "21"
@@ -87,9 +86,6 @@ class ConductorSettings(BaseSettings):
     demo: bool = False
     log_level: str = "INFO"
     max_workflow_processes: int = 200
-    data_container_chromosomes: list[str] = Field(
-        default_factory=lambda: [str(i) for i in range(1, 11)]
-    )
     tabix_image: str = "broadinstitute/gatk:4.4.0.0"
     tabix_job_timeout: int = 600
     monitor_poll_interval: int = 10

@@ -11,8 +11,8 @@ from workflow_conductor.models import ResourceProfile, WorkflowPlan
 def _nfs_storage_size(plan: WorkflowPlan) -> str:
     """Compute NFS PVC size based on estimated data size.
 
-    Default 10Gi is sufficient for chr1-10 from the data container.
-    For remote chromosomes (larger data), scale up based on the Composer's
+    Default 10Gi is sufficient for small regions (e.g., BRCA1).
+    For larger data (multi-chromosome), scale up based on the Composer's
     estimated_data_size_gb (accounts for compressed + uncompressed).
     """
     if plan.estimated_data_size_gb > 5:
@@ -40,9 +40,8 @@ def generate_helm_values(
     not via ConfigMap mount.
     """
     # Custom engine command: wait for conductor to signal readiness
-    # before running hflow. This prevents the engine from running the
-    # default workflow.json shipped by the data image before the
-    # conductor can overwrite it with the generated one.
+    # before running hflow. The conductor delivers workflow.json via
+    # kubectl cp, then touches .conductor-ready to start execution.
     engine_command = [
         "/bin/sh",
         "-c",
@@ -183,6 +182,13 @@ spec:
                     "job-template.yaml": job_template,
                 },
             },
+            # Disable init containers — the base values-fast-test-run.yaml
+            # enables a dataPreprocess init container that waits for
+            # workflow.json on NFS (from the data image). The conductor
+            # delivers workflow.json via kubectl cp after the engine starts.
+            "initContainers": {
+                "enabled": False,
+            },
         },
         "nfs-volume": {
             "pv": {
@@ -191,15 +197,15 @@ spec:
                 },
             },
         },
+        # Disable nfs-data subchart — conductor downloads data via tabix Jobs,
+        # not via the 1000genome-data Docker image
+        "hyperflow-nfs-data": {
+            "enabled": False,
+        },
         # Disable worker pools (1000genome uses job-based execution, not
         # the WorkerPool CRD which requires the operator chart in hf-ops)
         "workerPools": {
             "enabled": False,
-        },
-        "hyperflow-nfs-data": {
-            "workflow": {
-                "image": settings.data_image,
-            },
         },
     }
 

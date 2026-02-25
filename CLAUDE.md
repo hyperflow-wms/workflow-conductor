@@ -63,16 +63,27 @@ make teardown-all         # Full cleanup (cluster + releases)
 ```
 NL Prompt → ROUTING → PLANNING → VALIDATION (Gate 1) → PROVISIONING → DATA_PREPARATION
               │          │           │                      │                  │
-           hardcoded   Composer    Rich UI              Kind+Helm          decompress
-           to 1000g    MCP tools   approve/             hf-ops+hf-run     scan VCF
-                       via Agent   refine/abort         wait engine+data  row counts
+           hardcoded   Composer    Rich UI              Kind+Helm          tabix K8s Job
+           to 1000g    MCP tools   approve/             hf-ops+hf-run     scan VCF rows
+                       via Agent   refine/abort         wait engine       extract header
 
          → GENERATION → APPROVAL (Gate 2) → DEPLOYMENT → MONITORING → COMPLETION
               │              │                    │            │            │
            Composer       Rich UI              kubectl cp   poll K8s    teardown+
-           MCP tool       approve/abort        + signal     job status  summary
-           workflow.json  real task counts     engine
+           MCP tool       approve/abort        workflow.json job status  summary
+           deterministic  real task counts     +columns.txt
+           generate_workflow                   +pop files
+                                               +signal
 ```
+
+### Data Flow (No Data Container)
+
+The conductor does NOT use the `1000genome-data` Docker image. All data flows through:
+
+1. **Planning**: Composer MCP tools return `download_commands` (tabix URLs for region extraction)
+2. **Data Preparation**: K8s Job runs tabix commands to download VCF data to NFS volume, scans row counts, extracts VCF header
+3. **Generation**: Deterministic `generate_workflow` MCP tool call with actual row counts + VCF header → returns workflow.json + population-filtered columns.txt + population files
+4. **Deployment**: `kubectl cp` delivers workflow.json, columns.txt, population files to engine pod, then touches `.conductor-ready` signal
 
 ### Key Patterns
 
@@ -81,8 +92,18 @@ NL Prompt → ROUTING → PLANNING → VALIDATION (Gate 1) → PROVISIONING → 
 - **Context replay**: `planner_history` serialized in state enables conversation history to cross Temporal activity boundaries
 - **Context synthesis**: `synthesize_context_for_composer()` builds coherent context for stateless Composer calls during refinement loops
 - **K8s via subprocess**: Async wrappers around helm/kubectl (not Python K8s client); mirrors `fast-test.sh` flow
-- **Conductor signal pattern**: Engine command waits for `/work_dir/.conductor-ready`; conductor copies workflow.json via `kubectl cp` then touches the signal file
+- **Conductor signal pattern**: Engine command waits for `/work_dir/.conductor-ready`; conductor copies workflow.json + columns.txt + population files via `kubectl cp` then touches the signal file
+- **Deterministic generation**: `generate_workflow` MCP tool called directly with actual VCF row counts and header (no LLM involved in generation phase)
+- **Population-filtered columns.txt**: VCF header passed to `generate_workflow` → returns columns.txt with only requested population samples (e.g., 91 GBR instead of all 2504)
 - **LLM factory**: `{"anthropic": AnthropicAugmentedLLM, "google": GoogleAugmentedLLM}` — provider switchable via config
+
+### Helm Values Generation
+
+Generated values disable two upstream subchart features not needed by the conductor:
+- `hyperflow-nfs-data.enabled: false` — no data container image (conductor uses tabix Jobs)
+- `initContainers.enabled: false` — no init container waiting for workflow.json from data image (conductor delivers via kubectl cp after engine starts)
+
+NFS volume (`nfs-volume` subchart) remains enabled — engine pod and worker jobs share data via `claimName: nfs`.
 
 ### External Components
 
@@ -102,6 +123,8 @@ NL Prompt → ROUTING → PLANNING → VALIDATION (Gate 1) → PROVISIONING → 
 - **K8s ops**: subprocess helm/kubectl for MVP; kagent-tool-server in Stage 6
 - **K8s testing**: Kind primary, kr8s for async test assertions
 - **Workflow delivery**: Conductor signal pattern — `kubectl cp` + touch `.conductor-ready` (engine waits for signal before running)
+- **No data container**: All VCF data downloaded via tabix K8s Jobs from Composer's `download_commands` (not from `1000genome-data` Docker image)
+- **Deterministic generation**: `generate_workflow` MCP tool with actual row counts (not LLM-based `estimate_variants`)
 - **Config**: pydantic-settings with `HF_CONDUCTOR_` prefix, `__` nested delimiter
 - **CLI**: Click + Rich
 - **Package layout**: `src/workflow_conductor/` with `phases/`, `k8s/`, `ui/` subpackages
@@ -143,4 +166,4 @@ When testing the demo, run `make demo-test` (non-interactive, no pauses) in a ba
 
 ## Implementation Plan
 
-See `docs/implementation-plan.md` for the full plan (8 stages, 7 PRs for Stage 1). Stages 0-2 are core, 3-5 production-worthy, 6-7 refinements.
+See `docs/implementation-plan.md` for the full plan (8 stages, 7 PRs for Stage 1). Stages 0-2.6 completed. Stage 2.7 (no data container + deterministic generation) in progress.

@@ -61,7 +61,6 @@ async def kind_cluster(
         results = await asyncio.gather(
             cluster.load_image(settings.hf_engine_image, skip_check=True),
             cluster.load_image(settings.worker_image, skip_check=True),
-            cluster.load_image(settings.data_image, skip_check=True),
             return_exceptions=True,
         )
         for r in results:

@@ -31,7 +31,6 @@ class TestConductorSettingsDefaults:
         settings = _defaults()
         assert "hyperflowwms/hyperflow" in settings.hf_engine_image
         assert "1000genome-worker" in settings.worker_image
-        assert "1000genome-data" in settings.data_image
 
     def test_default_helm_timeouts(self) -> None:
         settings = _defaults()

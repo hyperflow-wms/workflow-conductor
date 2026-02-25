@@ -227,13 +227,15 @@ async def run_planning_phase(
     if history_data.get("plan_text"):
         plan_data.setdefault("plan_text", history_data["plan_text"])
 
-    # If Gemini called generate_workflow during planning, store it now
-    # so the generation phase can skip the redundant LLM call.
+    # Note: Gemini sometimes calls generate_workflow during planning, but
+    # we intentionally discard that workflow.  The generation phase will
+    # call generate_workflow deterministically with actual row counts from
+    # data_preparation (not the LLM's estimated counts).
     if history_data.get("workflow_json"):
-        state.workflow_json = history_data["workflow_json"]
         logger.info(
-            "Workflow JSON captured during planning (%d processes)",
-            len(state.workflow_json.get("processes", [])),
+            "Discarding planning-phase workflow JSON (%d processes) — "
+            "generation phase will regenerate with actual row counts",
+            len(history_data["workflow_json"].get("processes", [])),
         )
 
     # Extract data preparation commands from Composer response

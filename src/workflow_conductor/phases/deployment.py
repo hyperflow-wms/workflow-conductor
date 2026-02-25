@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import tempfile
 from typing import TYPE_CHECKING
 
@@ -70,9 +71,52 @@ async def run_deployment_phase(
             namespace=namespace,
             container="hyperflow",
         )
+        os.unlink(state.workflow_json_path)
 
-    # Step 2: Signal engine to start
-    logger.info("Step 2: Signaling engine to start")
+    # Step 2: Write columns.txt (population-filtered)
+    if state.columns_txt:
+        logger.info("Step 2: Deploying columns.txt to engine pod")
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".txt",
+            delete=False,
+        ) as f:
+            f.write(state.columns_txt)
+            columns_path = f.name
+        await kubectl.cp_to_pod(
+            columns_path,
+            state.engine_pod_name,
+            "/work_dir/columns.txt",
+            namespace=namespace,
+            container="hyperflow",
+        )
+        os.unlink(columns_path)
+
+    # Step 3: Write population files
+    if state.population_files:
+        logger.info(
+            "Step 3: Deploying %d population files", len(state.population_files)
+        )
+        for pop_name, pop_content in state.population_files.items():
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".txt",
+                delete=False,
+            ) as f:
+                f.write(pop_content)
+                pop_path = f.name
+            await kubectl.cp_to_pod(
+                pop_path,
+                state.engine_pod_name,
+                f"/work_dir/{pop_name}",
+                namespace=namespace,
+                container="hyperflow",
+            )
+            os.unlink(pop_path)
+            logger.info("  Deployed %s", pop_name)
+
+    # Step 4: Signal engine to start
+    logger.info("Step 4: Signaling engine to start")
     await kubectl.exec_in_pod(
         state.engine_pod_name,
         ["touch", "/work_dir/.conductor-ready"],

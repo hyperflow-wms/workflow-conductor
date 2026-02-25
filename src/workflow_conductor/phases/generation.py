@@ -1,7 +1,8 @@
-"""Generation phase: deferred workflow.json creation via Composer MCP.
+"""Generation phase: deterministic workflow.json creation via Composer MCP.
 
-Uses context replay (planner_history from planning phase) and actual
-infrastructure measurements to call the Composer's generate_workflow tool.
+Calls the Composer's generate_workflow MCP tool directly (no LLM) with
+exact chromosome data from the data_preparation phase.  This mirrors
+the upstream CLI path: `g1kwf generate --data-csv data.csv`.
 """
 
 from __future__ import annotations
@@ -12,8 +13,6 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from mcp_agent.agents.agent import Agent
-from mcp_agent.workflows.llm.augmented_llm import RequestParams
-from mcp_agent.workflows.llm.augmented_llm_anthropic import AnthropicAugmentedLLM
 
 from workflow_conductor.models import PipelinePhase, PipelineState
 from workflow_conductor.ui.display import display_phase_header
@@ -23,36 +22,64 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-GENERATION_INSTRUCTION = """You are a genomics workflow generation assistant.
-You have access to the 1000 Genomes Workflow Composer MCP server.
 
-Your task is to generate a complete HyperFlow workflow.json file. Follow these
-steps IN ORDER:
+def _extract_columns_txt(response: str) -> str:
+    """Extract columns.txt content from MCP tool response.
 
-1. Call estimate_variants for each chromosome listed below to get row counts.
-   If no chromosome data is provided, use the chromosomes and populations
-   from the research context.
-2. Call generate_workflow with:
-   - chromosome_data: array of {vcf_file, row_count, annotation_file} for
-     each chromosome (use "ALL.chr{N}.phase3.vcf.gz" as vcf_file and
-     "ALL.chr{N}.phase3.annotation.vcf.gz" as annotation_file)
-   - populations: the population codes from the research plan
-   - parallelism: "small" (unless specified otherwise)
+    Looks for a markdown section like:
+        ### columns.txt (91 individuals)
+        ```
+        #CHROM  POS  ...
+        ```
+    """
+    match = re.search(
+        r"###\s*columns\.txt[^\n]*\n```[^\n]*\n(.*?)\n```",
+        response,
+        re.DOTALL,
+    )
+    return match.group(1).strip() if match else ""
 
-You MUST call generate_workflow — do NOT return the workflow JSON yourself."""
 
+def _extract_population_files(response: str) -> dict[str, str]:
+    """Extract population file contents from MCP tool response.
 
-def _get_llm_class(provider: str) -> type:
-    if provider == "anthropic":
-        return AnthropicAugmentedLLM
-    if provider == "google":
-        from mcp_agent.workflows.llm.augmented_llm_google import GoogleAugmentedLLM  # noqa: PLC0415
-        return GoogleAugmentedLLM
-    raise ValueError(f"Unsupported LLM provider: {provider}")
+    Looks for a "Population Files" section containing entries like:
+        **GBR** (91 individuals):
+        ```
+        HG00096
+        HG00097
+        ...
+        ```
+
+    Only parses entries after a "Population Files" header to avoid matching
+    other bold text in the response.
+    """
+    # Find the Population Files section
+    section_match = re.search(
+        r"#+\s*Population\s+Files\s*\n(.*)",
+        response,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not section_match:
+        return {}
+
+    section_text = section_match.group(1)
+
+    result: dict[str, str] = {}
+    for match in re.finditer(
+        r"\*\*(\w+)\*\*\s*\([^)]*\):\s*\n```[^\n]*\n(.*?)\n```",
+        section_text,
+        re.DOTALL,
+    ):
+        pop_name = match.group(1)
+        content = match.group(2).strip()
+        if content:
+            result[pop_name] = content
+    return result
 
 
 def _extract_workflow_json(response: str) -> dict[str, Any] | None:
-    """Extract workflow JSON from LLM response.
+    """Extract workflow JSON from MCP tool response text.
 
     Handles: raw JSON, markdown code blocks, JSON embedded in text.
     Validates that extracted JSON contains both 'name' and 'processes' keys.
@@ -94,123 +121,106 @@ def _extract_workflow_json(response: str) -> dict[str, Any] | None:
     return None
 
 
-def _build_generation_prompt(state: PipelineState) -> str:
-    """Build prompt for workflow generation with chromosome data and context."""
-    parts: list[str] = []
-
-    parts.append(state.synthesize_context_for_composer())
-
-    if state.chromosome_data:
-        chr_entries = []
-        for cd in state.chromosome_data:
-            chr_entries.append(
-                f"  - chromosome: {cd.chromosome}, "
-                f"vcf_file: {cd.vcf_file}, "
-                f"row_count: {cd.row_count}, "
-                f"annotation_file: {cd.annotation_file}"
-            )
-        parts.append(
-            "Chromosome data for generate_workflow:\n" + "\n".join(chr_entries)
-        )
-
-    if state.workflow_plan:
-        parts.append(
-            f"Populations: {state.workflow_plan.populations}\n"
-            f"Parallelism: {state.workflow_plan.parallelism}"
-        )
-
-    parts.append(
-        "Call the generate_workflow tool with this chromosome data "
-        "and return the complete workflow JSON."
-    )
-
-    return "\n\n".join(parts)
-
-
 async def run_generation_phase(
     state: PipelineState,
     settings: ConductorSettings,
 ) -> PipelineState:
-    """Generate workflow.json via Composer MCP using actual measurements.
+    """Generate workflow.json by calling Composer MCP tool directly.
 
-    Uses context replay from planning phase and chromosome data from
-    provisioning to produce the definitive workflow.json.
+    This is a deterministic transformation: exact chromosome data (filenames
+    and row counts from data_preparation) + populations + parallelism
+    are passed programmatically to the generate_workflow MCP tool.
+    No LLM is involved — eliminates non-determinism from bugs where the
+    LLM would call estimate_variants, use wrong filenames, or change
+    parallelism.
     """
     display_phase_header(PipelinePhase.GENERATION)
 
-    # If the planning phase already produced workflow JSON (Gemini sometimes
-    # calls generate_workflow in one shot), skip the redundant LLM call.
-    if state.workflow_json is not None:
-        logger.info(
-            "Workflow JSON already present from planning phase (%d processes), "
-            "skipping generation",
-            len(state.workflow_json.get("processes", [])),
+    if not state.chromosome_data:
+        raise ValueError(
+            "Cannot generate workflow: no chromosome data "
+            "(data_preparation phase required)"
         )
-        return state
+    if not state.workflow_plan:
+        raise ValueError(
+            "Cannot generate workflow: no workflow plan (planning phase required)"
+        )
 
-    provider = settings.llm.default_provider
-    llm_class = _get_llm_class(provider)
+    # Build chromosome_data argument from actual scanned VCF data
+    chromosome_data = [
+        {
+            "vcf_file": cd.vcf_file,
+            "row_count": cd.row_count,
+            "annotation_file": cd.annotation_file,
+        }
+        for cd in state.chromosome_data
+    ]
 
-    logger.info("Generating workflow with provider=%s", provider)
+    # Get populations from the planning phase
+    populations = state.workflow_plan.populations
+    if not populations:
+        raise ValueError("Cannot generate workflow: no populations in workflow plan")
 
-    generation_agent = Agent(
+    # Get ind_jobs from plan's parameters_used (matches upstream data.csv path),
+    # falling back to "small" preset (10) if not available.
+    raw_plan = state.workflow_plan.raw_plan or {}
+    params_used = raw_plan.get("parameters_used", {})
+    ind_jobs = params_used.get("ind_jobs")
+
+    # Build MCP tool arguments
+    tool_args: dict[str, Any] = {
+        "chromosome_data": chromosome_data,
+        "populations": populations,
+    }
+    if state.vcf_header:
+        tool_args["vcf_header"] = state.vcf_header
+    if ind_jobs is not None:
+        tool_args["ind_jobs"] = ind_jobs
+    else:
+        tool_args["parallelism"] = "small"
+
+    logger.info(
+        "Generating workflow: %d chromosomes, populations=%s, %s",
+        len(chromosome_data),
+        populations,
+        f"ind_jobs={ind_jobs}" if ind_jobs else "parallelism=small",
+    )
+    for cd in chromosome_data:
+        logger.info(
+            "  %s: %d rows (%s)",
+            cd["vcf_file"],
+            cd["row_count"],
+            cd["annotation_file"],
+        )
+
+    # Call generate_workflow MCP tool directly — no LLM involved
+    composer_agent = Agent(
         name="generator",
-        instruction=GENERATION_INSTRUCTION,
+        instruction="",
         server_names=["workflow-composer"],
     )
 
-    async with generation_agent:
-        llm = await generation_agent.attach_llm(llm_class)
-
-        prompt = _build_generation_prompt(state)
-        response = await llm.generate_str(
-            message=prompt,
-            request_params=RequestParams(max_iterations=10),
+    async with composer_agent:
+        result = await composer_agent.call_tool(
+            name="generate_workflow",
+            arguments=tool_args,
         )
 
-    logger.debug("Generation response: %s", response)
+    # Extract workflow JSON from MCP tool response
+    if result.isError:
+        error_text = (
+            getattr(result.content[0], "text", str(result.content[0]))
+            if result.content
+            else "unknown error"
+        )
+        raise RuntimeError(f"generate_workflow MCP tool failed: {error_text}")
 
-    workflow_json = _extract_workflow_json(response)
+    response_text = "\n".join(
+        getattr(part, "text", "") for part in (result.content or [])
+    )
+    logger.debug("MCP tool response length: %d chars", len(response_text))
 
-    # Fallback: scan LLM history for tool results containing workflow JSON.
-    # Google Gemini returns function_call parts (not text) so generate_str()
-    # yields an empty string.  The actual workflow JSON lives inside
-    # function_response parts stored in llm.history.
-    if workflow_json is None and hasattr(llm, "history"):
-        try:
-            history = llm.history.get()
-        except Exception:
-            history = []
-
-        for msg in reversed(history):
-            if workflow_json is not None:
-                break
-            # Google: types.Content with .role and .parts
-            if hasattr(msg, "parts") and msg.parts:
-                for part in msg.parts:
-                    # Tool result stored as function_response
-                    fr = getattr(part, "function_response", None)
-                    if fr and hasattr(fr, "response") and isinstance(fr.response, dict):
-                        for val in fr.response.get("result", []):
-                            text = getattr(val, "text", None)
-                            if text:
-                                workflow_json = _extract_workflow_json(text)
-                                if workflow_json is not None:
-                                    logger.info(
-                                        "Extracted workflow JSON from tool result "
-                                        "in conversation history"
-                                    )
-                                    break
-                    # Also check plain text parts (model summary)
-                    if workflow_json is None:
-                        text = getattr(part, "text", None)
-                        if text:
-                            workflow_json = _extract_workflow_json(text)
-            # Anthropic: dict-based messages
-            elif isinstance(msg, dict):
-                content = str(msg.get("content", ""))
-                if content:
-                    workflow_json = _extract_workflow_json(content)
+    workflow_json = _extract_workflow_json(response_text)
 
     if workflow_json is not None:
         state.workflow_json = workflow_json
@@ -219,6 +229,37 @@ async def run_generation_phase(
             len(workflow_json.get("processes", [])),
         )
     else:
-        logger.warning("Could not extract workflow JSON from response")
+        raise RuntimeError(
+            "Could not extract workflow JSON from generate_workflow response"
+        )
+
+    # Extract columns.txt when vcf_header was provided
+    if state.vcf_header:
+        columns_txt = _extract_columns_txt(response_text)
+        if columns_txt:
+            state.columns_txt = columns_txt
+            col_count = len(columns_txt.split("\t"))
+            logger.info(
+                "Extracted columns.txt: %d fields (%d samples)",
+                col_count,
+                max(0, col_count - 9),
+            )
+        else:
+            raise RuntimeError(
+                "vcf_header was provided but no columns.txt found in "
+                "generate_workflow response — workers require columns.txt"
+            )
+
+    # Extract population files unconditionally — MCP returns them regardless
+    # of vcf_header, and workers need them for frequency analysis
+    pop_files = _extract_population_files(response_text)
+    if pop_files:
+        state.population_files = pop_files
+        for name, content in pop_files.items():
+            logger.info(
+                "Extracted population file: %s (%d individuals)",
+                name,
+                len(content.splitlines()),
+            )
 
     return state

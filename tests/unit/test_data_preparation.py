@@ -1,4 +1,4 @@
-"""Unit tests for the data preparation phase."""
+"""Unit tests for the data preparation phase (all-tabix, no data container)."""
 
 from __future__ import annotations
 
@@ -22,6 +22,16 @@ def _make_state(**overrides: object) -> PipelineState:
             populations=["EUR"],
             parallelism=10,
             description="test",
+            download_commands=[
+                (
+                    "curl -sL https://ex.co/ALL.chr1.vcf.gz"
+                    " | gunzip > /work_dir/ALL.chr1.250000.vcf"
+                ),
+                (
+                    "curl -sL https://ex.co/ALL.chr2.vcf.gz"
+                    " | gunzip > /work_dir/ALL.chr2.250000.vcf"
+                ),
+            ],
         ),
         namespace="wf-1000g-20260217-120000",
         cluster_ready=True,
@@ -33,7 +43,8 @@ def _make_state(**overrides: object) -> PipelineState:
 
 class TestDataPreparationPhase:
     @pytest.mark.asyncio
-    async def test_decompresses_data_files(self) -> None:
+    async def test_downloads_via_tabix_job(self) -> None:
+        """All chromosomes download via K8s Job (no data container)."""
         from workflow_conductor.phases.data_preparation import (
             run_data_preparation_phase,
         )
@@ -43,21 +54,66 @@ class TestDataPreparationPhase:
 
         with patch("workflow_conductor.phases.data_preparation.Kubectl") as MockKubectl:
             kubectl = MockKubectl.return_value
+            kubectl.apply_json = AsyncMock(return_value="job created")
+            kubectl.wait_for_job = AsyncMock(return_value="")
             kubectl.exec_in_pod = AsyncMock(
                 side_effect=[
-                    "",  # decompress command
+                    # scan VCF files
                     "1:5000:ALL.chr1.250000.vcf:ALL.chr1.ann.vcf\n"
-                    "2:6000:ALL.chr2.250000.vcf:ALL.chr2.ann.vcf",  # scan
+                    "2:6000:ALL.chr2.250000.vcf:ALL.chr2.ann.vcf",
+                    # extract VCF header
+                    "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG00096",
                 ]
             )
 
             result = await run_data_preparation_phase(state, settings)
 
-        # First exec call is the decompress command
-        decompress_call = kubectl.exec_in_pod.call_args_list[0]
-        assert "gunzip" in decompress_call.args[1][2]
-        assert decompress_call.kwargs["container"] == "hyperflow"
+        # Should create tabix job
+        kubectl.apply_json.assert_called_once()
+        job_manifest = kubectl.apply_json.call_args.args[0]
+        assert job_manifest["kind"] == "Job"
+        assert job_manifest["metadata"]["name"] == "tabix-extract"
+
+        # Should wait for the job
+        kubectl.wait_for_job.assert_called_once()
+
+        # Should scan VCF row counts
         assert len(result.chromosome_data) == 2
+        assert result.chromosome_data[0].row_count == 5000
+        assert result.chromosome_data[1].row_count == 6000
+
+    @pytest.mark.asyncio
+    async def test_extracts_vcf_header(self) -> None:
+        from workflow_conductor.phases.data_preparation import (
+            run_data_preparation_phase,
+        )
+
+        state = _make_state()
+        settings = ConductorSettings()
+
+        vcf_header = (
+            "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG00096\tHG00097"
+        )
+
+        with patch("workflow_conductor.phases.data_preparation.Kubectl") as MockKubectl:
+            kubectl = MockKubectl.return_value
+            kubectl.apply_json = AsyncMock(return_value="job created")
+            kubectl.wait_for_job = AsyncMock(return_value="")
+            kubectl.exec_in_pod = AsyncMock(
+                side_effect=[
+                    "1:5000:ALL.chr1.250000.vcf:ALL.chr1.ann.vcf\n"
+                    "2:6000:ALL.chr2.250000.vcf:ALL.chr2.ann.vcf",
+                    vcf_header,
+                ]
+            )
+
+            result = await run_data_preparation_phase(state, settings)
+
+        assert result.vcf_header == vcf_header
+        # Header extraction is the second exec_in_pod call
+        header_call = kubectl.exec_in_pod.call_args_list[1]
+        assert "grep" in header_call.args[1][2]
+        assert "#CHROM" in header_call.args[1][2]
 
     @pytest.mark.asyncio
     async def test_scans_row_counts(self) -> None:
@@ -70,11 +126,13 @@ class TestDataPreparationPhase:
 
         with patch("workflow_conductor.phases.data_preparation.Kubectl") as MockKubectl:
             kubectl = MockKubectl.return_value
+            kubectl.apply_json = AsyncMock(return_value="job created")
+            kubectl.wait_for_job = AsyncMock(return_value="")
             kubectl.exec_in_pod = AsyncMock(
                 side_effect=[
-                    "",  # decompress
                     "1:12345:ALL.chr1.250000.vcf:ALL.chr1.ann.vcf\n"
-                    "2:67890:ALL.chr2.250000.vcf:ALL.chr2.ann.vcf",  # scan
+                    "2:67890:ALL.chr2.250000.vcf:ALL.chr2.ann.vcf",
+                    "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1",
                 ]
             )
 
@@ -125,139 +183,26 @@ class TestDataPreparationPhase:
         with pytest.raises(ValueError, match="No chromosomes specified"):
             await run_data_preparation_phase(state, settings)
 
-
-class TestRemoteExtraction:
-    """Tests for remote chromosome extraction via K8s Job."""
-
     @pytest.mark.asyncio
-    async def test_remote_chromosomes_create_tabix_job(self) -> None:
-        """Remote chromosomes trigger apply_json + wait_for_job."""
+    async def test_requires_download_commands(self) -> None:
         from workflow_conductor.phases.data_preparation import (
             run_data_preparation_phase,
         )
 
         state = _make_state(
             workflow_plan=WorkflowPlan(
-                chromosomes=["11"],
-                populations=["EUR"],
-                download_commands=[
-                    (
-                        "curl -sL https://ex.co/ALL.chr11.vcf.gz"
-                        " | gunzip > ALL.chr11.250000.vcf"
-                    ),
-                ],
-            ),
-        )
-        settings = ConductorSettings()
-
-        with patch("workflow_conductor.phases.data_preparation.Kubectl") as MockKubectl:
-            kubectl = MockKubectl.return_value
-            kubectl.apply_json = AsyncMock(return_value="job created")
-            kubectl.wait_for_job = AsyncMock(return_value="")
-            kubectl.exec_in_pod = AsyncMock(
-                side_effect=[
-                    "",  # stage shared files (columns.txt, populations)
-                    "11:9999:ALL.chr11.250000.vcf:ALL.chr11.ann.vcf",  # scan
-                ]
-            )
-
-            result = await run_data_preparation_phase(state, settings)
-
-        # Should call exec_in_pod for staging, then scan
-        # Should call apply_json with Job manifest
-        kubectl.apply_json.assert_called_once()
-        job_manifest = kubectl.apply_json.call_args.args[0]
-        assert job_manifest["kind"] == "Job"
-        assert job_manifest["metadata"]["name"] == "tabix-extract"
-        assert job_manifest["spec"]["template"]["spec"]["containers"][0]["image"] == (
-            "broadinstitute/gatk:4.4.0.0"
-        )
-
-        # Should wait for the job
-        kubectl.wait_for_job.assert_called_once_with(
-            "tabix-extract",
-            namespace="wf-1000g-20260217-120000",
-            timeout=600,
-        )
-
-        # Should still scan row counts
-        assert len(result.chromosome_data) == 1
-        assert result.chromosome_data[0].chromosome == "11"
-        assert result.chromosome_data[0].row_count == 9999
-
-    @pytest.mark.asyncio
-    async def test_mixed_local_remote_chromosomes(self) -> None:
-        """Both local decompress and remote Job paths run."""
-        from workflow_conductor.phases.data_preparation import (
-            run_data_preparation_phase,
-        )
-
-        state = _make_state(
-            workflow_plan=WorkflowPlan(
-                chromosomes=["1", "11"],
-                populations=["EUR"],
-                download_commands=[
-                    (
-                        "curl -sL https://ex.co/ALL.chr11.vcf.gz"
-                        " | gunzip > ALL.chr11.250000.vcf"
-                    ),
-                ],
-            ),
-        )
-        settings = ConductorSettings()
-
-        with patch("workflow_conductor.phases.data_preparation.Kubectl") as MockKubectl:
-            kubectl = MockKubectl.return_value
-            kubectl.exec_in_pod = AsyncMock(
-                side_effect=[
-                    "",  # decompress (local)
-                    "1:5000:ALL.chr1.250000.vcf:ALL.chr1.ann.vcf\n"
-                    "11:8000:ALL.chr11.250000.vcf:ALL.chr11.ann.vcf",  # scan (all)
-                ]
-            )
-            kubectl.apply_json = AsyncMock(return_value="job created")
-            kubectl.wait_for_job = AsyncMock(return_value="")
-
-            result = await run_data_preparation_phase(state, settings)
-
-        # Local decompress ran
-        decompress_call = kubectl.exec_in_pod.call_args_list[0]
-        assert "gunzip" in decompress_call.args[1][2]
-
-        # Remote Job ran
-        kubectl.apply_json.assert_called_once()
-        kubectl.wait_for_job.assert_called_once()
-
-        # Both chromosomes scanned
-        assert len(result.chromosome_data) == 2
-
-    @pytest.mark.asyncio
-    async def test_remote_without_commands_raises(self) -> None:
-        """ValueError when remote chromosomes requested but no download_commands."""
-        from workflow_conductor.phases.data_preparation import (
-            run_data_preparation_phase,
-        )
-
-        state = _make_state(
-            workflow_plan=WorkflowPlan(
-                chromosomes=["22"],
+                chromosomes=["1"],
                 populations=["EUR"],
                 download_commands=[],
             ),
         )
         settings = ConductorSettings()
 
-        with (
-            patch("workflow_conductor.phases.data_preparation.Kubectl") as MockKubectl,
-            pytest.raises(ValueError, match="require remote extraction"),
-        ):
-            kubectl = MockKubectl.return_value
-            kubectl.exec_in_pod = AsyncMock(return_value="")
+        with pytest.raises(ValueError, match="No download commands"):
             await run_data_preparation_phase(state, settings)
 
     @pytest.mark.asyncio
-    async def test_remote_no_matching_commands_raises(self) -> None:
-        """ValueError when commands exist but none match the chromosome."""
+    async def test_no_matching_commands_raises(self) -> None:
         from workflow_conductor.phases.data_preparation import (
             run_data_preparation_phase,
         )
@@ -267,21 +212,13 @@ class TestRemoteExtraction:
                 chromosomes=["22"],
                 populations=["EUR"],
                 download_commands=[
-                    (
-                        "curl -sL https://ex.co/ALL.chr11.vcf.gz"
-                        " | gunzip > ALL.chr11.250000.vcf"
-                    ),
+                    "curl -sL https://ex.co/ALL.chr11.vcf.gz | gunzip > ALL.chr11.vcf",
                 ],
             ),
         )
         settings = ConductorSettings()
 
-        with (
-            patch("workflow_conductor.phases.data_preparation.Kubectl") as MockKubectl,
-            pytest.raises(ValueError, match="No download commands found"),
-        ):
-            kubectl = MockKubectl.return_value
-            kubectl.exec_in_pod = AsyncMock(return_value="")
+        with pytest.raises(ValueError, match="No download commands found"):
             await run_data_preparation_phase(state, settings)
 
 
