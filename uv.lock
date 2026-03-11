@@ -457,6 +457,16 @@ wheels = [
 ]
 
 [[package]]
+name = "execution-sentinel"
+version = "0.1.0"
+source = { git = "https://github.com/hyperflow-wms/execution-sentinel.git#bfc0831df730b983a9caced6da382338c22b631f" }
+dependencies = [
+    { name = "click" },
+    { name = "pydantic-settings" },
+    { name = "rich" },
+]
+
+[[package]]
 name = "fastapi"
 version = "0.129.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2568,6 +2578,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
+    { name = "execution-sentinel" },
     { name = "mcp", extra = ["cli"] },
     { name = "mcp-agent", extra = ["anthropic"] },
     { name = "pydantic-settings" },
@@ -2613,6 +2624,7 @@ temporal = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.1" },
+    { name = "execution-sentinel", git = "https://github.com/hyperflow-wms/execution-sentinel.git" },
     { name = "kr8s", marker = "extra == 'integration'", specifier = ">=0.17" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.0.0" },
     { name = "mcp-agent", extras = ["anthropic"], specifier = ">=0.2.6" },
