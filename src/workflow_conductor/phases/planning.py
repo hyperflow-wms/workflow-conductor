@@ -42,7 +42,8 @@ def _get_llm_class(provider: str) -> type:
     if provider == "anthropic":
         return AnthropicAugmentedLLM
     if provider == "google":
-        from mcp_agent.workflows.llm.augmented_llm_google import GoogleAugmentedLLM  # noqa: PLC0415
+        from mcp_agent.workflows.llm.augmented_llm_google import GoogleAugmentedLLM  # noqa: I001
+
         return GoogleAugmentedLLM
     raise ValueError(f"Unsupported LLM provider: {provider}")
 

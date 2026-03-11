@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-execution-sentinel = { path = "../execution-sentinel", editable = true }
+execution-sentinel = { git = "https://github.com/hyperflow-wms/execution-sentinel.git" }
 
 [project.optional-dependencies]
 google = ["mcp-agent[google]>=0.2.6"]

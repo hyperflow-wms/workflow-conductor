@@ -18,10 +18,10 @@ from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
-
 from execution_sentinel.config import SentinelSettings
 from execution_sentinel.models import MonitoringContext, TaskSpec
 from execution_sentinel.sentinel import Sentinel
+
 from workflow_conductor.config import ConductorSettings
 from workflow_conductor.k8s import Kubectl
 from workflow_conductor.models import PipelineState

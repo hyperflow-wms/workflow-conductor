@@ -20,7 +20,6 @@ from workflow_conductor.models import (
     WorkflowPlan,
 )
 
-
 # ---------------------------------------------------------------------------
 # Shared mock builders
 # ---------------------------------------------------------------------------
@@ -107,8 +106,10 @@ def _patch_all(*names: str) -> list[Any]:
 
 class TestProvisioningToDataPreparation:
     async def test_data_prep_uses_namespace_from_provisioning(self) -> None:
-        """Namespace set by provisioning is forwarded to data_preparation kubectl calls."""
-        from workflow_conductor.phases.data_preparation import run_data_preparation_phase
+        """Namespace from provisioning forwards to data_prep."""
+        from workflow_conductor.phases.data_preparation import (
+            run_data_preparation_phase,
+        )
         from workflow_conductor.phases.provisioning import run_provisioning_phase
 
         settings = ConductorSettings()
@@ -125,13 +126,22 @@ class TestProvisioningToDataPreparation:
         # ── Phase 4: Provisioning ───────────────────────────────────────────
         with ExitStack() as stack:
             stack.enter_context(
-                patch("workflow_conductor.phases.provisioning.Kubectl", return_value=_mock_kubectl())
+                patch(
+                    "workflow_conductor.phases.provisioning.Kubectl",
+                    return_value=_mock_kubectl(),
+                )
             )
             stack.enter_context(
-                patch("workflow_conductor.phases.provisioning.Helm", return_value=_mock_helm())
+                patch(
+                    "workflow_conductor.phases.provisioning.Helm",
+                    return_value=_mock_helm(),
+                )
             )
             stack.enter_context(
-                patch("workflow_conductor.phases.provisioning.KindCluster", return_value=_mock_kind())
+                patch(
+                    "workflow_conductor.phases.provisioning.KindCluster",
+                    return_value=_mock_kind(),
+                )
             )
             stack.enter_context(
                 patch("workflow_conductor.phases.provisioning.display_phase_header")
@@ -148,14 +158,19 @@ class TestProvisioningToDataPreparation:
         discovery_output = "1:1234:ALL.chr1.250000.vcf:none"
         exec_calls: list[dict[str, Any]] = []
 
-        async def exec_side(pod: str, _cmd: list[str], *, namespace: str, **kw: Any) -> str:
+        async def exec_side(
+            pod: str, _cmd: list[str], *, namespace: str, **kw: Any
+        ) -> str:
             exec_calls.append({"pod": pod, "namespace": namespace})
             return "" if len(exec_calls) == 1 else discovery_output
 
         kubectl2 = _mock_kubectl(exec_in_pod=AsyncMock(side_effect=exec_side))
         with ExitStack() as stack:
             stack.enter_context(
-                patch("workflow_conductor.phases.data_preparation.Kubectl", return_value=kubectl2)
+                patch(
+                    "workflow_conductor.phases.data_preparation.Kubectl",
+                    return_value=kubectl2,
+                )
             )
             stack.enter_context(
                 patch("workflow_conductor.phases.data_preparation.display_phase_header")
@@ -173,7 +188,9 @@ class TestProvisioningToDataPreparation:
 
     async def test_data_prep_raises_without_provisioned_namespace(self) -> None:
         """run_data_preparation_phase raises ValueError when namespace is not set."""
-        from workflow_conductor.phases.data_preparation import run_data_preparation_phase
+        from workflow_conductor.phases.data_preparation import (
+            run_data_preparation_phase,
+        )
 
         state = PipelineState(
             engine_pod_name="engine-0",
@@ -184,8 +201,10 @@ class TestProvisioningToDataPreparation:
             await run_data_preparation_phase(state, ConductorSettings())
 
     async def test_data_prep_raises_without_engine_pod(self) -> None:
-        """run_data_preparation_phase raises ValueError when engine_pod_name is not set."""
-        from workflow_conductor.phases.data_preparation import run_data_preparation_phase
+        """data_preparation raises when engine_pod_name unset."""
+        from workflow_conductor.phases.data_preparation import (
+            run_data_preparation_phase,
+        )
 
         state = PipelineState(
             namespace="wf-1000g-20260101",
@@ -197,12 +216,16 @@ class TestProvisioningToDataPreparation:
 
     async def test_data_prep_parses_multiple_chromosomes(self) -> None:
         """row counts parsed for each chromosome individually."""
-        from workflow_conductor.phases.data_preparation import run_data_preparation_phase
+        from workflow_conductor.phases.data_preparation import (
+            run_data_preparation_phase,
+        )
 
         state = PipelineState(
             engine_pod_name="engine-0",
             namespace="wf-ns",
-            workflow_plan=WorkflowPlan(chromosomes=["1", "2", "3"], populations=["EUR"]),
+            workflow_plan=WorkflowPlan(
+                chromosomes=["1", "2", "3"], populations=["EUR"]
+            ),
         )
         discovery = (
             "1:1000:ALL.chr1.250000.vcf:ALL.chr1.annotation.vcf\n"
@@ -219,7 +242,10 @@ class TestProvisioningToDataPreparation:
         kubectl = _mock_kubectl(exec_in_pod=AsyncMock(side_effect=exec_side))
         with ExitStack() as stack:
             stack.enter_context(
-                patch("workflow_conductor.phases.data_preparation.Kubectl", return_value=kubectl)
+                patch(
+                    "workflow_conductor.phases.data_preparation.Kubectl",
+                    return_value=kubectl,
+                )
             )
             stack.enter_context(
                 patch("workflow_conductor.phases.data_preparation.display_phase_header")
@@ -236,7 +262,9 @@ class TestProvisioningToDataPreparation:
 
     async def test_data_prep_skips_malformed_discovery_lines(self) -> None:
         """Lines with fewer than 3 colon-separated parts are silently skipped."""
-        from workflow_conductor.phases.data_preparation import run_data_preparation_phase
+        from workflow_conductor.phases.data_preparation import (
+            run_data_preparation_phase,
+        )
 
         state = PipelineState(
             engine_pod_name="engine-0",
@@ -259,7 +287,10 @@ class TestProvisioningToDataPreparation:
         kubectl = _mock_kubectl(exec_in_pod=AsyncMock(side_effect=exec_side))
         with ExitStack() as stack:
             stack.enter_context(
-                patch("workflow_conductor.phases.data_preparation.Kubectl", return_value=kubectl)
+                patch(
+                    "workflow_conductor.phases.data_preparation.Kubectl",
+                    return_value=kubectl,
+                )
             )
             stack.enter_context(
                 patch("workflow_conductor.phases.data_preparation.display_phase_header")
@@ -277,7 +308,7 @@ class TestProvisioningToDataPreparation:
 
 class TestMonitoringToCompletion:
     async def test_completed_workflow_produces_completed_status(self) -> None:
-        """exit_code=0 from sentinel → workflow_status='completed' → PipelineStatus.COMPLETED."""
+        """exit_code=0 → status COMPLETED."""
         from workflow_conductor.models import PipelineStatus
         from workflow_conductor.phases.completion import run_completion_phase
         from workflow_conductor.phases.monitoring import run_monitoring_phase
@@ -306,10 +337,16 @@ class TestMonitoringToCompletion:
         # ── Phase 10: Completion ────────────────────────────────────────────
         with ExitStack() as stack:
             stack.enter_context(
-                patch("workflow_conductor.phases.completion.Kubectl", return_value=_mock_kubectl())
+                patch(
+                    "workflow_conductor.phases.completion.Kubectl",
+                    return_value=_mock_kubectl(),
+                )
             )
             stack.enter_context(
-                patch("workflow_conductor.phases.completion.Helm", return_value=_mock_helm())
+                patch(
+                    "workflow_conductor.phases.completion.Helm",
+                    return_value=_mock_helm(),
+                )
             )
             for p in _DISPLAY_ALL:
                 stack.enter_context(patch(p))
@@ -321,7 +358,7 @@ class TestMonitoringToCompletion:
         assert state.execution_summary.total_tasks == 10
 
     async def test_failed_workflow_produces_failed_status(self) -> None:
-        """exit_code=1 from sentinel → workflow_status='failed' → PipelineStatus.FAILED."""
+        """exit_code=1 → status FAILED."""
         from workflow_conductor.models import PipelineStatus
         from workflow_conductor.phases.completion import run_completion_phase
         from workflow_conductor.phases.monitoring import run_monitoring_phase
@@ -348,10 +385,16 @@ class TestMonitoringToCompletion:
 
         with ExitStack() as stack:
             stack.enter_context(
-                patch("workflow_conductor.phases.completion.Kubectl", return_value=_mock_kubectl())
+                patch(
+                    "workflow_conductor.phases.completion.Kubectl",
+                    return_value=_mock_kubectl(),
+                )
             )
             stack.enter_context(
-                patch("workflow_conductor.phases.completion.Helm", return_value=_mock_helm())
+                patch(
+                    "workflow_conductor.phases.completion.Helm",
+                    return_value=_mock_helm(),
+                )
             )
             for p in _DISPLAY_ALL:
                 stack.enter_context(patch(p))
@@ -385,10 +428,16 @@ class TestMonitoringToCompletion:
 
         with ExitStack() as stack:
             stack.enter_context(
-                patch("workflow_conductor.phases.completion.Kubectl", return_value=_mock_kubectl())
+                patch(
+                    "workflow_conductor.phases.completion.Kubectl",
+                    return_value=_mock_kubectl(),
+                )
             )
             stack.enter_context(
-                patch("workflow_conductor.phases.completion.Helm", return_value=_mock_helm())
+                patch(
+                    "workflow_conductor.phases.completion.Helm",
+                    return_value=_mock_helm(),
+                )
             )
             for p in _DISPLAY_ALL:
                 stack.enter_context(patch(p))
@@ -419,10 +468,16 @@ class TestMonitoringToCompletion:
 
         with ExitStack() as stack:
             stack.enter_context(
-                patch("workflow_conductor.phases.completion.Kubectl", return_value=_mock_kubectl())
+                patch(
+                    "workflow_conductor.phases.completion.Kubectl",
+                    return_value=_mock_kubectl(),
+                )
             )
             stack.enter_context(
-                patch("workflow_conductor.phases.completion.Helm", return_value=_mock_helm())
+                patch(
+                    "workflow_conductor.phases.completion.Helm",
+                    return_value=_mock_helm(),
+                )
             )
             for p in _DISPLAY_ALL:
                 stack.enter_context(patch(p))
@@ -547,8 +602,7 @@ class TestBuildMonitoringContext:
             engine_pod_name="pod-0",
             workflow_json={
                 "processes": [
-                    {"name": f"task-{i}", "fun": "selectVariants"}
-                    for i in range(n)
+                    {"name": f"task-{i}", "fun": "selectVariants"} for i in range(n)
                 ]
             },
         )

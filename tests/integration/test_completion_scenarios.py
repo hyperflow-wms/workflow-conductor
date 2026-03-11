@@ -10,14 +10,12 @@ No Kind cluster required — all Helm and kubectl calls are mocked.
 from __future__ import annotations
 
 from contextlib import ExitStack
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from workflow_conductor.config import ConductorSettings
 from workflow_conductor.models import PipelineState, PipelineStatus
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -56,7 +54,9 @@ def _state(
         workflow_status=workflow_status,
         task_completion_count=completed_tasks,
         total_task_count=total_tasks,
-        phase_timings=phase_timings if phase_timings is not None else {"planning": 1.5, "provisioning": 60.0},
+        phase_timings=phase_timings
+        if phase_timings is not None
+        else {"planning": 1.5, "provisioning": 60.0},
     )
 
 
@@ -128,7 +128,7 @@ class TestTeardownFlags:
         assert result.teardown_completed is False
 
     async def test_empty_namespace_skips_teardown_even_with_auto(self) -> None:
-        """If namespace is empty string teardown is skipped despite auto_teardown=True."""
+        """Empty namespace skips teardown despite auto_teardown."""
         settings = ConductorSettings(auto_teardown=True)
         helm = _mock_helm()
 
@@ -161,7 +161,7 @@ class TestReleaseExistence:
         assert helm.uninstall.await_count == 2
 
     async def test_all_absent_skips_uninstalls_but_deletes_namespace(self) -> None:
-        """All releases absent → no uninstall calls, but namespace deletion still runs."""
+        """All releases absent → no uninstalls, namespace deleted."""
         settings = ConductorSettings(auto_teardown=True)
         helm = _mock_helm(all_exist=False)
         kubectl = _mock_kubectl()
@@ -200,7 +200,7 @@ class TestReleaseExistence:
 
 class TestTeardownErrors:
     async def test_helm_error_during_uninstall_does_not_raise(self) -> None:
-        """HelmError during uninstall is swallowed — phase completes without exception."""
+        """HelmError during uninstall is swallowed."""
         from workflow_conductor.k8s.helm import HelmError
 
         settings = ConductorSettings(auto_teardown=True)
@@ -298,7 +298,7 @@ class TestStatusMapping:
 
 class TestExecutionSummary:
     async def test_summary_reflects_task_counts_from_state(self) -> None:
-        """ExecutionSummary carries completed_tasks and total_tasks from PipelineState."""
+        """ExecutionSummary carries task counts from state."""
         settings = ConductorSettings(auto_teardown=False)
         result = await _run(
             _state(completed_tasks=8, total_tasks=10),

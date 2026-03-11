@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from execution_sentinel.config import SentinelSettings
-from execution_sentinel.models import MonitoringContext, SentinelReport, TaskSpec
-from execution_sentinel.sentinel import Sentinel
-from execution_sentinel.ui.display import (
+from execution_sentinel.config import SentinelSettings  # type: ignore[import-untyped]
+from execution_sentinel.models import (  # type: ignore[import-untyped]
+    MonitoringContext,
+    SentinelReport,
+    TaskSpec,
+)
+from execution_sentinel.sentinel import Sentinel  # type: ignore[import-untyped]
+from execution_sentinel.ui.display import (  # type: ignore[import-untyped]
     display_completion_summary,
     display_report,
     display_sentinel_banner,
@@ -53,13 +57,6 @@ _1000G_DEFAULT_DURATIONS: dict[str, float] = {
 }
 
 
-# TODO: re-enable when hf-engine K8s service name/port confirmed from Helm charts
-# def _build_hyperflow_endpoint(state: PipelineState) -> str:
-#     if state.namespace:
-#         return f"http://hf-engine.{state.namespace}.svc.cluster.local:8080"
-#     return ""
-
-
 def _build_monitoring_context(state: PipelineState) -> MonitoringContext:
     profile_by_type = {p.task_type: p for p in state.resource_profiles}
     task_inventory = []
@@ -88,11 +85,10 @@ def _build_monitoring_context(state: PipelineState) -> MonitoringContext:
         engine_container="hyperflow",
         task_inventory=task_inventory,
         dag_structure=_1000G_TASK_DEPS,
-        # hyperflow_api_endpoint=_build_hyperflow_endpoint(state),  # TODO: re-enable when confirmed
     )
 
 
-async def _translate_to_nl(report: SentinelReport, settings: "ConductorSettings") -> str:
+async def _translate_to_nl(report: SentinelReport, settings: ConductorSettings) -> str:
     """Translate a Sentinel report into a science-friendly sentence for the user."""
     try:
         import anthropic  # type: ignore[import-untyped]
@@ -110,9 +106,10 @@ async def _translate_to_nl(report: SentinelReport, settings: "ConductorSettings"
             max_tokens=100,
             messages=[{"role": "user", "content": prompt}],
         )
-        return response.content[0].text.strip()  # type: ignore[index]
+        result: str = response.content[0].text.strip()  # type: ignore[union-attr]
+        return result
     except Exception:  # noqa: BLE001
-        return report.message
+        return str(report.message)
 
 
 async def run_monitoring_phase(

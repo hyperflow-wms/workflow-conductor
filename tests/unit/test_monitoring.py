@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import ExitStack
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from workflow_conductor.config import ConductorSettings
 from workflow_conductor.models import PipelineState, ResourceProfile
+
+if TYPE_CHECKING:
+    from execution_sentinel.models import WatchSummary
 
 
 def _make_summary(
@@ -19,7 +23,7 @@ def _make_summary(
     exit_code: int | None = None,
     timed_out: bool = False,
     mass_failure: bool = False,
-) -> "WatchSummary":
+) -> WatchSummary:
     from execution_sentinel.models import WatchSummary
 
     return WatchSummary(
@@ -32,7 +36,7 @@ def _make_summary(
     )
 
 
-def _make_sentinel_mock(summary: "WatchSummary") -> MagicMock:
+def _make_sentinel_mock(summary: WatchSummary) -> MagicMock:
     """Build a mock Sentinel instance that returns the given summary."""
     instance = MagicMock()
     instance.watch = AsyncMock(return_value=summary)
@@ -261,10 +265,13 @@ class TestBuildMonitoringContext:
             workflow_json={"processes": [{"name": "sifting-0", "fun": "sifting"}]},
         )
         ctx = _build_monitoring_context(state)
-        assert ctx.task_inventory[0].expected_duration_seconds == _1000G_DEFAULT_DURATIONS["sifting"]
+        assert (
+            ctx.task_inventory[0].expected_duration_seconds
+            == _1000G_DEFAULT_DURATIONS["sifting"]
+        )
 
     def test_profiler_zero_duration_uses_default(self) -> None:
-        """A profiler entry with expected_duration_seconds=0 still falls back to defaults."""
+        """Profiler entry with duration=0 falls back to default."""
         from workflow_conductor.phases.monitoring import (
             _1000G_DEFAULT_DURATIONS,
             _build_monitoring_context,
@@ -279,7 +286,10 @@ class TestBuildMonitoringContext:
             ],
         )
         ctx = _build_monitoring_context(state)
-        assert ctx.task_inventory[0].expected_duration_seconds == _1000G_DEFAULT_DURATIONS["sifting"]
+        assert (
+            ctx.task_inventory[0].expected_duration_seconds
+            == _1000G_DEFAULT_DURATIONS["sifting"]
+        )
 
     def test_empty_workflow_json_empty_inventory(self) -> None:
         from workflow_conductor.phases.monitoring import _build_monitoring_context
@@ -297,8 +307,9 @@ class TestBuildMonitoringContext:
 class TestTranslateToNl:
     @pytest.mark.asyncio
     async def test_fallback_on_api_error(self) -> None:
-        """When Anthropic API raises, _translate_to_nl returns report.message unchanged."""
+        """On API error, _translate_to_nl returns message unchanged."""
         from execution_sentinel.models import ReportKind, SentinelReport
+
         from workflow_conductor.phases.monitoring import _translate_to_nl
 
         report = SentinelReport(
@@ -309,7 +320,9 @@ class TestTranslateToNl:
         )
         settings = ConductorSettings()
 
-        with patch("anthropic.AsyncAnthropic", side_effect=Exception("API unavailable")):
+        with patch(
+            "anthropic.AsyncAnthropic", side_effect=Exception("API unavailable")
+        ):
             result = await _translate_to_nl(report, settings)
 
         assert result == "3/10 tasks completed."
@@ -318,6 +331,7 @@ class TestTranslateToNl:
     async def test_returns_stripped_translated_text(self) -> None:
         """Successful API call returns stripped translated text."""
         from execution_sentinel.models import ReportKind, SentinelReport
+
         from workflow_conductor.phases.monitoring import _translate_to_nl
 
         report = SentinelReport(
@@ -342,6 +356,7 @@ class TestTranslateToNl:
     async def test_uses_configured_model(self) -> None:
         """_translate_to_nl passes settings.llm.anthropic_model to the API."""
         from execution_sentinel.models import ReportKind, SentinelReport
+
         from workflow_conductor.phases.monitoring import _translate_to_nl
 
         report = SentinelReport(kind=ReportKind.COMPLETION, message="Done.")
