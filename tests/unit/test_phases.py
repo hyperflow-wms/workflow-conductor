@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,6 +13,7 @@ from workflow_conductor.models import (
     PipelineStatus,
     WorkflowPlan,
 )
+from workflow_conductor.phases.completion import run_completion_phase
 from workflow_conductor.phases.routing import SUPPORTED_DOMAIN, run_routing_phase
 from workflow_conductor.phases.validation import run_validation_phase
 
@@ -188,6 +190,52 @@ class TestValidationPhase:
         state = PipelineState()
         with pytest.raises(ValueError, match="No workflow plan"):
             await run_validation_phase(state)
+
+
+class TestCompletionPhase:
+    @pytest.mark.asyncio
+    async def test_writes_experiment_report_when_configured(
+        self, tmp_path: Path
+    ) -> None:
+        """Completion phase writes experiment report when path is configured."""
+        report_path = str(tmp_path / "report.md")
+        state = PipelineState(
+            user_prompt="Analyze GBR population on chromosome 17",
+            workflow_status="completed",
+            phase_timings={"routing": 0.1, "planning": 5.0, "monitoring": 60.0},
+        )
+        settings = ConductorSettings(
+            experiment_report_path=report_path,
+            no_teardown=True,
+            auto_teardown=False,
+            demo=False,
+        )
+        result = await run_completion_phase(state, settings)
+
+        assert result.status == PipelineStatus.COMPLETED
+        report = Path(report_path)
+        assert report.exists()
+        content = report.read_text()
+        assert "Analyze GBR population on chromosome 17" in content
+
+    @pytest.mark.asyncio
+    async def test_no_report_when_path_not_configured(self) -> None:
+        """Completion phase skips report when experiment_report_path is empty."""
+        state = PipelineState(
+            user_prompt="test query",
+            workflow_status="completed",
+            phase_timings={"routing": 0.1},
+        )
+        settings = ConductorSettings(
+            no_teardown=True,
+            auto_teardown=False,
+            demo=False,
+        )
+        with patch(
+            "workflow_conductor.phases.completion.write_experiment_report"
+        ) as mock_write:
+            await run_completion_phase(state, settings)
+            mock_write.assert_not_called()
 
 
 class TestAppCreation:

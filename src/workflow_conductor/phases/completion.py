@@ -14,6 +14,7 @@ from workflow_conductor.models import (
     PipelineState,
     PipelineStatus,
 )
+from workflow_conductor.reporting import write_experiment_report
 from workflow_conductor.ui.display import (
     display_completion_summary,
     display_phase_header,
@@ -81,5 +82,13 @@ async def run_completion_phase(
         state.status = PipelineStatus.FAILED
 
     display_completion_summary(state)
+
+    # Write experiment report if path configured
+    if settings.experiment_report_path:
+        try:
+            path = write_experiment_report(state, settings.experiment_report_path)
+            logger.info("Experiment report written to: %s", path)
+        except Exception:
+            logger.warning("Failed to write experiment report", exc_info=True)
 
     return state
