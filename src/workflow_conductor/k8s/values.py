@@ -12,11 +12,14 @@ def _nfs_storage_size(plan: WorkflowPlan) -> str:
     """Compute NFS PVC size based on estimated data size.
 
     Default 10Gi is sufficient for small regions (e.g., BRCA1).
-    For larger data (multi-chromosome), scale up based on the Composer's
-    estimated_data_size_gb (accounts for compressed + uncompressed).
+    For larger data, the Composer's estimated_data_size_gb is the
+    *compressed* transfer size. VCFs are decompressed on disk via
+    ``curl | gunzip``, so we multiply by the typical VCF compression
+    ratio (~20x) to estimate actual disk usage, then add headroom.
     """
-    if plan.estimated_data_size_gb > 5:
-        size_gi = max(10, int(plan.estimated_data_size_gb * 2) + 5)
+    if plan.estimated_data_size_gb > 0.5:
+        disk_gb = plan.estimated_data_size_gb * 20  # decompressed
+        size_gi = max(10, int(disk_gb * 1.5) + 5)  # 50% headroom
         return f"{size_gi}Gi"
     return "10Gi"
 

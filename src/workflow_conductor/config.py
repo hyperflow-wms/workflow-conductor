@@ -87,7 +87,7 @@ class ConductorSettings(BaseSettings):
     log_level: str = "INFO"
     max_workflow_processes: int = 200
     tabix_image: str = "broadinstitute/gatk:4.4.0.0"
-    tabix_job_timeout: int = 600
+    tabix_job_timeout: int = 3600
     monitor_poll_interval: int = 10
     monitor_timeout: int = 3600
     experiment_report_path: str = ""
