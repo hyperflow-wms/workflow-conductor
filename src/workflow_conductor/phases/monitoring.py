@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from execution_sentinel.config import SentinelSettings  # type: ignore[import-untyped]
 from execution_sentinel.models import (  # type: ignore[import-untyped]
@@ -88,8 +88,13 @@ def _build_monitoring_context(state: PipelineState) -> MonitoringContext:
     )
 
 
-async def _translate_to_nl(report: SentinelReport, settings: ConductorSettings) -> str:
-    """Translate a Sentinel report into a science-friendly sentence for the user."""
+async def _translate_to_nl(
+    report: SentinelReport, settings: ConductorSettings
+) -> tuple[str, dict[str, Any]]:
+    """Translate a Sentinel report into a science-friendly sentence.
+
+    Returns (translated_text, usage_dict).
+    """
     try:
         import anthropic  # type: ignore[import-untyped]
 
@@ -107,9 +112,14 @@ async def _translate_to_nl(report: SentinelReport, settings: ConductorSettings) 
             messages=[{"role": "user", "content": prompt}],
         )
         result: str = response.content[0].text.strip()  # type: ignore[union-attr]
-        return result
+        usage: dict[str, Any] = {
+            "input_tokens": response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
+            "model": settings.llm.anthropic_model,
+        }
+        return result, usage
     except Exception:  # noqa: BLE001
-        return str(report.message)
+        return str(report.message), {}
 
 
 async def run_monitoring_phase(
@@ -146,10 +156,23 @@ async def run_monitoring_phase(
 
     display_sentinel_banner(context.namespace, context.total_expected_tasks)
 
+    monitoring_llm_usage: dict[str, int | str] = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "api_calls": 0,
+        "model": "",
+    }
+
     async def _drain() -> None:
         while True:
             report = await sentinel.reports.get()
-            report.nl_message = await _translate_to_nl(report, settings)
+            text, usage = await _translate_to_nl(report, settings)
+            report.nl_message = text
+            if usage:
+                monitoring_llm_usage["input_tokens"] += usage.get("input_tokens", 0)  # type: ignore[operator]
+                monitoring_llm_usage["output_tokens"] += usage.get("output_tokens", 0)  # type: ignore[operator]
+                monitoring_llm_usage["api_calls"] += 1  # type: ignore[operator]
+                monitoring_llm_usage["model"] = usage.get("model", "")
             display_report(report)
 
     drain_task = asyncio.create_task(_drain())
@@ -173,6 +196,9 @@ async def run_monitoring_phase(
         state.workflow_status = "failed"
     else:
         state.workflow_status = "completed"
+
+    if monitoring_llm_usage["api_calls"] > 0:
+        state.llm_usage["monitoring"] = dict(monitoring_llm_usage)
 
     # Capture engine logs via sentinel's kubectl client
     try:

@@ -191,6 +191,58 @@ class TestMonitoringPhase:
         context_arg = MockSentinel.call_args[0][0]
         assert context_arg.namespace == "my-namespace"
 
+    @pytest.mark.asyncio
+    async def test_accumulates_llm_usage(self) -> None:
+        """Monitoring phase accumulates LLM token usage from _translate_to_nl."""
+        from execution_sentinel.models import ReportKind, SentinelReport
+
+        from workflow_conductor.phases.monitoring import run_monitoring_phase
+
+        state = PipelineState(namespace="test-ns", engine_pod_name="engine-pod-1")
+        settings = ConductorSettings()
+        summary = _make_summary(completed=5, total=5, exit_code=0)
+
+        mock_sentinel = _make_sentinel_mock(summary)
+
+        # Pre-fill the queue with two reports
+        r1 = SentinelReport(
+            kind=ReportKind.PROGRESS, message="2/5", completed_tasks=2, total_tasks=5
+        )
+        r2 = SentinelReport(
+            kind=ReportKind.COMPLETION, message="5/5", completed_tasks=5, total_tasks=5
+        )
+        mock_sentinel.reports.put_nowait(r1)
+        mock_sentinel.reports.put_nowait(r2)
+
+        # Make watch() yield control so the drain task can process queued reports
+        async def _slow_watch() -> _make_summary.__class__:  # type: ignore[name-defined]
+            while not mock_sentinel.reports.empty():
+                await asyncio.sleep(0.01)
+            return summary
+
+        mock_sentinel.watch = _slow_watch
+
+        with ExitStack() as stack:
+            MockSentinel = stack.enter_context(
+                patch("workflow_conductor.phases.monitoring.Sentinel")
+            )
+            for p in _DISPLAY_PATCHES:
+                stack.enter_context(patch(p))
+            stack.enter_context(
+                patch(
+                    "workflow_conductor.phases.monitoring._translate_to_nl",
+                    AsyncMock(return_value=("Translated.", {"input_tokens": 30, "output_tokens": 10, "model": "claude-test"})),
+                )
+            )
+            MockSentinel.return_value = mock_sentinel
+            result = await run_monitoring_phase(state, settings)
+
+        assert "monitoring" in result.llm_usage
+        assert result.llm_usage["monitoring"]["input_tokens"] == 60
+        assert result.llm_usage["monitoring"]["output_tokens"] == 20
+        assert result.llm_usage["monitoring"]["api_calls"] == 2
+        assert result.llm_usage["monitoring"]["model"] == "claude-test"
+
 
 # ---------------------------------------------------------------------------
 # Test: _build_monitoring_context
@@ -323,9 +375,10 @@ class TestTranslateToNl:
         with patch(
             "anthropic.AsyncAnthropic", side_effect=Exception("API unavailable")
         ):
-            result = await _translate_to_nl(report, settings)
+            text, usage = await _translate_to_nl(report, settings)
 
-        assert result == "3/10 tasks completed."
+        assert text == "3/10 tasks completed."
+        assert usage == {}
 
     @pytest.mark.asyncio
     async def test_returns_stripped_translated_text(self) -> None:
@@ -342,15 +395,22 @@ class TestTranslateToNl:
         )
         settings = ConductorSettings()
 
+        mock_usage = MagicMock()
+        mock_usage.input_tokens = 50
+        mock_usage.output_tokens = 20
         mock_response = MagicMock()
         mock_response.content = [MagicMock(text="  Analysis is 30% complete.  ")]
+        mock_response.usage = mock_usage
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
 
         with patch("anthropic.AsyncAnthropic", return_value=mock_client):
-            result = await _translate_to_nl(report, settings)
+            text, usage = await _translate_to_nl(report, settings)
 
-        assert result == "Analysis is 30% complete."
+        assert text == "Analysis is 30% complete."
+        assert usage["input_tokens"] == 50
+        assert usage["output_tokens"] == 20
+        assert usage["model"] == settings.llm.anthropic_model
 
     @pytest.mark.asyncio
     async def test_uses_configured_model(self) -> None:
@@ -362,8 +422,12 @@ class TestTranslateToNl:
         report = SentinelReport(kind=ReportKind.COMPLETION, message="Done.")
         settings = ConductorSettings()
 
+        mock_usage = MagicMock()
+        mock_usage.input_tokens = 40
+        mock_usage.output_tokens = 15
         mock_response = MagicMock()
         mock_response.content = [MagicMock(text="Workflow finished.")]
+        mock_response.usage = mock_usage
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=mock_response)
 
