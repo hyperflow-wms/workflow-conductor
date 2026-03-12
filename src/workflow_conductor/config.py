@@ -90,3 +90,4 @@ class ConductorSettings(BaseSettings):
     tabix_job_timeout: int = 600
     monitor_poll_interval: int = 10
     monitor_timeout: int = 3600
+    experiment_report_path: str = ""

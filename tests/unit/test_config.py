@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 
+import pytest
+
 from workflow_conductor.config import ConductorSettings
 
 
@@ -86,6 +88,16 @@ class TestConductorSettingsEnvOverride:
         ):
             settings = ConductorSettings()
             assert settings.helm.charts_path == "/custom/charts"
+
+
+def test_experiment_report_path_default_empty() -> None:
+    settings = ConductorSettings()
+    assert settings.experiment_report_path == ""
+
+def test_experiment_report_path_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HF_CONDUCTOR_EXPERIMENT_REPORT_PATH", "/tmp/report.md")
+    settings = ConductorSettings()
+    assert settings.experiment_report_path == "/tmp/report.md"
 
 
 class TestConductorSettingsConstructor:
