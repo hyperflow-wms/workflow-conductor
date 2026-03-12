@@ -109,12 +109,11 @@ class TestGenerateHelmValues:
         assert ".conductor-ready" in cmd_str
         assert "hflow run workflow.json" in cmd_str
 
-    def test_job_template_uses_hfmaster(self) -> None:
+    def test_job_template_has_no_node_selector(self) -> None:
         settings = ConductorSettings()
         plan = WorkflowPlan()
         values = generate_helm_values(settings, plan, namespace="test-ns")
         engine = values["hyperflow-engine"]
         job_template = engine["configMap"]["data"]["job-template.yaml"]
-        # Worker jobs use hfmaster (not hfworker) so single-node clusters work
-        assert "hyperflow-wms/nodepool: hfmaster" in job_template
-        assert "hfworker" not in job_template
+        # No nodeSelector — jobs schedule on all nodes (hfmaster + hfworker)
+        assert "nodeSelector" not in job_template

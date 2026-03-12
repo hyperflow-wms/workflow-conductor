@@ -72,15 +72,23 @@ class TestReportGeneration:
             "estimated_tasks": 50,
         }
         state.execution_summary = ExecutionSummary(
-            total_tasks=47, completed_tasks=47, failed_tasks=0, total_runtime_seconds=239.0,
+            total_tasks=47,
+            completed_tasks=47,
+            failed_tasks=0,
+            total_runtime_seconds=239.0,
         )
         state.workflow_json = {
             "name": "1000genome-brca1",
-            "processes": [{"name": f"individuals_{i}", "fun": "individuals"} for i in range(10)]
-                       + [{"name": "individuals_merge_1", "fun": "individuals_merge"}]
-                       + [{"name": f"sifting_{i}", "fun": "sifting"} for i in range(10)]
-                       + [{"name": f"frequency_{i}", "fun": "frequency"} for i in range(13)]
-                       + [{"name": f"mutation_overlap_{i}", "fun": "mutation_overlap"} for i in range(13)],
+            "processes": [
+                {"name": f"individuals_{i}", "fun": "individuals"} for i in range(10)
+            ]
+            + [{"name": "individuals_merge_1", "fun": "individuals_merge"}]
+            + [{"name": f"sifting_{i}", "fun": "sifting"} for i in range(10)]
+            + [{"name": f"frequency_{i}", "fun": "frequency"} for i in range(13)]
+            + [
+                {"name": f"mutation_overlap_{i}", "fun": "mutation_overlap"}
+                for i in range(13)
+            ],
             "signals": [{"name": f"sig_{i}"} for i in range(46)],
         }
         return state

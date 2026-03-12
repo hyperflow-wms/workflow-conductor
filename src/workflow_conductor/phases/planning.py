@@ -182,7 +182,7 @@ def _extract_plan_data_from_history(llm: Any) -> dict[str, Any]:
 
 
 def _extract_planning_estimates(raw_plan: dict[str, Any]) -> dict[str, Any]:
-    """Extract estimated metrics from the Composer's raw plan for experiment reporting."""
+    """Extract estimated metrics from raw plan for reporting."""
     estimates: dict[str, Any] = {}
     dp = raw_plan.get("data_preparation", {})
     if dp.get("estimated_transfer_mb"):
@@ -315,7 +315,9 @@ async def run_planning_phase(
                             tool_call_count += 1
 
     state.llm_usage["planning"] = {
-        "model": settings.llm.google_model if provider == "google" else settings.llm.anthropic_model,
+        "model": settings.llm.google_model
+        if provider == "google"
+        else settings.llm.anthropic_model,
         "provider": provider,
         "latency_ms": latency_ms,
         "tool_calls": tool_call_count,

@@ -6,8 +6,6 @@ paper/e2e-experiment-instructions.md.
 
 from __future__ import annotations
 
-from typing import Any
-
 from workflow_conductor.models import PipelineState
 
 
@@ -55,9 +53,16 @@ def generate_experiment_report(state: PipelineState) -> str:
     lines.append("|-------|-------------|")
     total = 0.0
     for phase_name in [
-        "routing", "planning", "validation", "provisioning",
-        "data_preparation", "generation", "approval",
-        "deployment", "monitoring", "completion",
+        "routing",
+        "planning",
+        "validation",
+        "provisioning",
+        "data_preparation",
+        "generation",
+        "approval",
+        "deployment",
+        "monitoring",
+        "completion",
     ]:
         dur = state.phase_timings.get(phase_name, 0.0)
         total += dur
@@ -70,14 +75,18 @@ def generate_experiment_report(state: PipelineState) -> str:
     lines.append("")
 
     # Grouped timings
-    llm_time = state.phase_timings.get("planning", 0) + state.phase_timings.get("generation", 0)
+    llm_time = state.phase_timings.get("planning", 0) + state.phase_timings.get(
+        "generation", 0
+    )
     infra_time = (
         state.phase_timings.get("provisioning", 0)
         + state.phase_timings.get("data_preparation", 0)
         + state.phase_timings.get("deployment", 0)
     )
     exec_time = state.phase_timings.get("monitoring", 0)
-    overhead = state.phase_timings.get("routing", 0) + state.phase_timings.get("completion", 0)
+    overhead = state.phase_timings.get("routing", 0) + state.phase_timings.get(
+        "completion", 0
+    )
 
     lines.append("### Grouped")
     lines.append("")
@@ -108,7 +117,8 @@ def generate_experiment_report(state: PipelineState) -> str:
     lines.append(f"| Total processes | {len(processes)} |")
     lines.append(f"| Total signals | {len(signals)} |")
     lines.append(f"| K8s jobs completed | {state.task_completion_count} |")
-    lines.append(f"| K8s jobs failed | {max(0, state.total_task_count - state.task_completion_count)} |")
+    failed = max(0, state.total_task_count - state.task_completion_count)
+    lines.append(f"| K8s jobs failed | {failed} |")
 
     # Task type breakdown
     type_counts: dict[str, int] = {}
@@ -152,9 +162,15 @@ def generate_experiment_report(state: PipelineState) -> str:
     pu = state.llm_usage.get("planning", {})
     mu = state.llm_usage.get("monitoring", {})
     lines.append(f"| Model | {pu.get('model', 'N/A')} | {mu.get('model', 'N/A')} |")
-    lines.append(f"| Input tokens | {pu.get('input_tokens', 'N/A')} | {mu.get('input_tokens', 'N/A')} |")
-    lines.append(f"| Output tokens | {pu.get('output_tokens', 'N/A')} | {mu.get('output_tokens', 'N/A')} |")
-    lines.append(f"| Tool calls | {pu.get('tool_calls', 'N/A')} | {mu.get('api_calls', 'N/A')} |")
+    p_in = pu.get("input_tokens", "N/A")
+    m_in = mu.get("input_tokens", "N/A")
+    lines.append(f"| Input tokens | {p_in} | {m_in} |")
+    p_out = pu.get("output_tokens", "N/A")
+    m_out = mu.get("output_tokens", "N/A")
+    lines.append(f"| Output tokens | {p_out} | {m_out} |")
+    lines.append(
+        f"| Tool calls | {pu.get('tool_calls', 'N/A')} | {mu.get('api_calls', 'N/A')} |"
+    )
     lines.append(f"| Latency (ms) | {pu.get('latency_ms', 'N/A')} | N/A |")
     lines.append("")
 
@@ -199,9 +215,12 @@ def write_experiment_report(
     report = generate_experiment_report(state)
 
     # Resolve placeholders in path
-    path = output_path.replace("{date}", state.execution_id[:8] if state.execution_id else "unknown")
+    path = output_path.replace(
+        "{date}", state.execution_id[:8] if state.execution_id else "unknown"
+    )
 
     import os
+
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:
         f.write(report)

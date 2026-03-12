@@ -124,9 +124,7 @@ async def _translate_to_nl(
         return str(report.message), {}
 
 
-async def _capture_cluster_snapshot(
-    kubectl: Kubectl, namespace: str
-) -> dict[str, str]:
+async def _capture_cluster_snapshot(kubectl: Kubectl, namespace: str) -> dict[str, str]:
     """Capture a point-in-time cluster utilization snapshot via kubectl top."""
     snapshot: dict[str, str] = {
         "timestamp": datetime.now(UTC).isoformat(),
@@ -180,7 +178,7 @@ async def run_monitoring_phase(
 
     display_sentinel_banner(context.namespace, context.total_expected_tasks)
 
-    monitoring_llm_usage: dict[str, int | str] = {
+    monitoring_llm_usage: dict[str, Any] = {
         "input_tokens": 0,
         "output_tokens": 0,
         "api_calls": 0,
@@ -195,9 +193,9 @@ async def run_monitoring_phase(
             text, usage = await _translate_to_nl(report, settings)
             report.nl_message = text
             if usage:
-                monitoring_llm_usage["input_tokens"] += usage.get("input_tokens", 0)  # type: ignore[operator]
-                monitoring_llm_usage["output_tokens"] += usage.get("output_tokens", 0)  # type: ignore[operator]
-                monitoring_llm_usage["api_calls"] += 1  # type: ignore[operator]
+                monitoring_llm_usage["input_tokens"] += usage.get("input_tokens", 0)
+                monitoring_llm_usage["output_tokens"] += usage.get("output_tokens", 0)
+                monitoring_llm_usage["api_calls"] += 1
                 monitoring_llm_usage["model"] = usage.get("model", "")
             display_report(report)
 

@@ -231,7 +231,16 @@ class TestMonitoringPhase:
             stack.enter_context(
                 patch(
                     "workflow_conductor.phases.monitoring._translate_to_nl",
-                    AsyncMock(return_value=("Translated.", {"input_tokens": 30, "output_tokens": 10, "model": "claude-test"})),
+                    AsyncMock(
+                        return_value=(
+                            "Translated.",
+                            {
+                                "input_tokens": 30,
+                                "output_tokens": 10,
+                                "model": "claude-test",
+                            },
+                        )
+                    ),
                 )
             )
             MockSentinel.return_value = mock_sentinel
@@ -466,9 +475,7 @@ class TestClusterSnapshots:
         from workflow_conductor.phases.monitoring import _capture_cluster_snapshot
 
         mock_kubectl = AsyncMock()
-        mock_kubectl._run = AsyncMock(
-            side_effect=Exception("metrics not available")
-        )
+        mock_kubectl._run = AsyncMock(side_effect=Exception("metrics not available"))
 
         snapshot = await _capture_cluster_snapshot(mock_kubectl, "test-ns")
         assert snapshot["nodes"] == ""

@@ -94,6 +94,7 @@ def test_experiment_report_path_default_empty() -> None:
     settings = ConductorSettings()
     assert settings.experiment_report_path == ""
 
+
 def test_experiment_report_path_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HF_CONDUCTOR_EXPERIMENT_REPORT_PATH", "/tmp/report.md")
     settings = ConductorSettings()
