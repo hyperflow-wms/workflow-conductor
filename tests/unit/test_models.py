@@ -303,3 +303,29 @@ class TestRetryPolicy:
         )
         assert policy.max_retries == 5
         assert len(policy.retryable_errors) == 2
+
+
+class TestExperimentDataFields:
+    def test_llm_usage_default_empty(self) -> None:
+        state = PipelineState()
+        assert state.llm_usage == {}
+
+    def test_planning_estimates_default_empty(self) -> None:
+        state = PipelineState()
+        assert state.planning_estimates == {}
+
+    def test_cluster_snapshots_default_empty(self) -> None:
+        state = PipelineState()
+        assert state.cluster_snapshots == []
+
+    def test_experiment_fields_serialize(self) -> None:
+        state = PipelineState()
+        state.llm_usage = {"planning": {"input_tokens": 100, "output_tokens": 50}}
+        state.planning_estimates = {"estimated_tasks": 340}
+        state.cluster_snapshots = [{"timestamp": "2026-03-12T14:00:00", "nodes": "..."}]
+        data = state.model_dump()
+        assert data["llm_usage"]["planning"]["input_tokens"] == 100
+        assert data["planning_estimates"]["estimated_tasks"] == 340
+        assert len(data["cluster_snapshots"]) == 1
+        restored = PipelineState.from_json(state.to_json())
+        assert restored.llm_usage == state.llm_usage

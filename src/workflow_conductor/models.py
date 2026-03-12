@@ -215,6 +215,12 @@ class PipelineState(BaseModel):
     phase_results: list[PhaseResult] = Field(default_factory=list)
     planner_history: list[dict[str, Any]] = Field(default_factory=list)
     phase_timings: dict[str, float] = Field(default_factory=dict)
+
+    # Experiment data capture (for paper reporting)
+    llm_usage: dict[str, Any] = Field(default_factory=dict)
+    planning_estimates: dict[str, Any] = Field(default_factory=dict)
+    cluster_snapshots: list[dict[str, Any]] = Field(default_factory=list)
+
     errors: list[PipelineError] = Field(default_factory=list)
 
     def record_phase(self, result: PhaseResult) -> None:
