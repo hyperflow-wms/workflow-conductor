@@ -121,6 +121,88 @@ class TestDownloadCommandsExtraction:
         assert result.workflow_plan.data_preparation == {}
 
 
+class TestLLMUsageCapture:
+    """Verify planning phase captures LLM usage metrics."""
+
+    @pytest.mark.asyncio
+    async def test_llm_usage_populated_after_planning(self) -> None:
+        """state.llm_usage['planning'] should contain model, provider,
+        latency_ms, and tool_calls after run_planning_phase."""
+        import json
+
+        from workflow_conductor.models import PipelineState
+        from workflow_conductor.phases.planning import run_planning_phase
+
+        state = PipelineState()
+        state.intent_classification = "1000genome"
+        state.add_conversation("user", "Analyze chr1 EUR")
+        settings = ConductorSettings()
+
+        plan_json = {
+            "description": "1000 Genomes analysis",
+            "chromosomes": ["1"],
+            "populations": ["EUR"],
+        }
+
+        mock_llm = _make_mock_llm(json.dumps(plan_json))
+        mock_agent = _make_mock_agent(mock_llm)
+
+        with patch(
+            "workflow_conductor.phases.planning.Agent",
+            return_value=mock_agent,
+        ):
+            result = await run_planning_phase(state, settings)
+
+        assert "planning" in result.llm_usage
+        usage = result.llm_usage["planning"]
+        assert usage["provider"] == settings.llm.default_provider
+        assert usage["model"] is not None
+        assert usage["latency_ms"] >= 0
+        assert usage["tool_calls"] == 0  # mock history is empty
+
+    @pytest.mark.asyncio
+    async def test_llm_usage_counts_tool_calls(self) -> None:
+        """tool_calls should reflect function_call parts in history."""
+        import json
+
+        from workflow_conductor.models import PipelineState
+        from workflow_conductor.phases.planning import run_planning_phase
+
+        state = PipelineState()
+        state.intent_classification = "1000genome"
+        state.add_conversation("user", "Analyze chr1 EUR")
+        settings = ConductorSettings()
+
+        plan_json = {
+            "description": "1000 Genomes analysis",
+            "chromosomes": ["1"],
+            "populations": ["EUR"],
+        }
+
+        # Create history with 2 function calls
+        fc_part1 = MagicMock()
+        fc_part1.function_call = MagicMock(name="plan_workflow")
+        fc_part1.function_response = None
+
+        fc_part2 = MagicMock()
+        fc_part2.function_call = MagicMock(name="list_populations")
+        fc_part2.function_response = None
+
+        msg = MagicMock()
+        msg.parts = [fc_part1, fc_part2]
+
+        mock_llm = _make_mock_llm(json.dumps(plan_json), history=[msg])
+        mock_agent = _make_mock_agent(mock_llm)
+
+        with patch(
+            "workflow_conductor.phases.planning.Agent",
+            return_value=mock_agent,
+        ):
+            result = await run_planning_phase(state, settings)
+
+        assert result.llm_usage["planning"]["tool_calls"] == 2
+
+
 class TestChromosomeInference:
     """Verify chromosome inference from download commands and workflow JSON."""
 

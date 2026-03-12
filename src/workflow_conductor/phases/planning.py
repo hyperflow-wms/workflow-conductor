@@ -10,6 +10,7 @@ import contextlib
 import json
 import logging
 import re
+import time
 from typing import TYPE_CHECKING, Any
 
 from mcp_agent.agents.agent import Agent
@@ -180,6 +181,28 @@ def _extract_plan_data_from_history(llm: Any) -> dict[str, Any]:
     return result
 
 
+def _extract_planning_estimates(raw_plan: dict[str, Any]) -> dict[str, Any]:
+    """Extract estimated metrics from the Composer's raw plan for experiment reporting."""
+    estimates: dict[str, Any] = {}
+    dp = raw_plan.get("data_preparation", {})
+    if dp.get("estimated_transfer_mb"):
+        estimates["estimated_transfer_mb"] = dp["estimated_transfer_mb"]
+    hints = raw_plan.get("execution_hints", {})
+    if hints.get("recommended_parallelism"):
+        estimates["estimated_parallelism"] = hints["recommended_parallelism"]
+    if raw_plan.get("estimated_task_count"):
+        estimates["estimated_tasks"] = raw_plan["estimated_task_count"]
+    # Extract per-chromosome variant estimates if available
+    for step in dp.get("steps", []):
+        if step.get("estimated_variants"):
+            chrom = step.get("chromosome", "")
+            if chrom:
+                estimates.setdefault("estimated_variants", {})[chrom] = step[
+                    "estimated_variants"
+                ]
+    return estimates
+
+
 async def run_planning_phase(
     state: PipelineState,
     settings: ConductorSettings,
@@ -205,10 +228,12 @@ async def run_planning_phase(
         llm = await composer_agent.attach_llm(llm_class)
 
         prompt = state.synthesize_context_for_composer()
+        start_ms = time.monotonic()
         response = await llm.generate_str(
             message=f"Plan a workflow for: {prompt}",
             request_params=RequestParams(max_iterations=5),
         )
+        latency_ms = int((time.monotonic() - start_ms) * 1000)
 
     logger.debug("Planning response: %s", response)
 
@@ -266,6 +291,8 @@ async def run_planning_phase(
         raw_plan=raw_plan,
     )
 
+    state.planning_estimates = _extract_planning_estimates(raw_plan)
+
     # Capture conversation history for context replay in later phases.
     # mcp-agent stores history in llm.history (SimpleMemory), not
     # conversation_history.
@@ -275,6 +302,24 @@ async def run_planning_phase(
                 {"role": getattr(m, "role", "unknown"), "content": str(m)}
                 for m in llm.history.get()
             ]
+
+    # Count tool calls from history for experiment reporting
+    tool_call_count = 0
+    if hasattr(llm, "history"):
+        with contextlib.suppress(Exception):
+            for msg in llm.history.get():
+                if hasattr(msg, "parts") and msg.parts:
+                    for part in msg.parts:
+                        fc = getattr(part, "function_call", None)
+                        if fc:
+                            tool_call_count += 1
+
+    state.llm_usage["planning"] = {
+        "model": settings.llm.google_model if provider == "google" else settings.llm.anthropic_model,
+        "provider": provider,
+        "latency_ms": latency_ms,
+        "tool_calls": tool_call_count,
+    }
 
     state.add_conversation("assistant", response)
 
