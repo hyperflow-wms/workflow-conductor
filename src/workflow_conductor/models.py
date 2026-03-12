@@ -93,6 +93,7 @@ class ChromosomeData(BaseModel):
     row_count: int
     annotation_file: str
     chromosome: str
+    file_size_bytes: int = 0
 
 
 class ResourceProfile(BaseModel):

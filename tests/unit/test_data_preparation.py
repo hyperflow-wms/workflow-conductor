@@ -58,9 +58,9 @@ class TestDataPreparationPhase:
             kubectl.wait_for_job = AsyncMock(return_value="")
             kubectl.exec_in_pod = AsyncMock(
                 side_effect=[
-                    # scan VCF files
-                    "1:5000:ALL.chr1.250000.vcf:ALL.chr1.ann.vcf\n"
-                    "2:6000:ALL.chr2.250000.vcf:ALL.chr2.ann.vcf",
+                    # scan VCF files (format: chrom:count:vcf:ann:size)
+                    "1:5000:ALL.chr1.250000.vcf:ALL.chr1.ann.vcf:1000000\n"
+                    "2:6000:ALL.chr2.250000.vcf:ALL.chr2.ann.vcf:2000000",
                     # extract VCF header
                     "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG00096",
                 ]
@@ -130,8 +130,8 @@ class TestDataPreparationPhase:
             kubectl.wait_for_job = AsyncMock(return_value="")
             kubectl.exec_in_pod = AsyncMock(
                 side_effect=[
-                    "1:12345:ALL.chr1.250000.vcf:ALL.chr1.ann.vcf\n"
-                    "2:67890:ALL.chr2.250000.vcf:ALL.chr2.ann.vcf",
+                    "1:12345:ALL.chr1.250000.vcf:ALL.chr1.ann.vcf:5000000\n"
+                    "2:67890:ALL.chr2.250000.vcf:ALL.chr2.ann.vcf:8000000",
                     "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1",
                 ]
             )

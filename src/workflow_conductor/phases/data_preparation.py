@@ -10,6 +10,7 @@ After provisioning (hf-ops + hf-run), this phase:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -159,7 +160,9 @@ async def run_data_preparation_phase(
         "  ann=$(ls /work_dir/ALL.chr${c}.*annotation*.vcf 2>/dev/null | head -1); "
         '  if [ -n "$vcf" ]; then '
         '    count=$(grep -c -v "^#" "$vcf"); '
-        '    echo "${c}:${count}:$(basename $vcf):$(basename ${ann:-none})"; '
+        '    sz=$(stat -c %s "$vcf" 2>/dev/null'
+        ' || stat -f %z "$vcf" 2>/dev/null || echo 0); '
+        '    echo "${c}:${count}:$(basename $vcf):$(basename ${ann:-none}):${sz}"; '
         "  fi; "
         "done"
     )
@@ -172,7 +175,7 @@ async def run_data_preparation_phase(
     )
 
     # Parse output → chromosome_data
-    # Format: "17:1234:ALL.chr17.brca1.vcf:ALL.chr17.brca1.annotation.vcf"
+    # Format: "17:1234:ALL.chr17.brca1.vcf:ALL.chr17.brca1.annotation.vcf:56789"
     state.chromosome_data = []
     for line in output.strip().splitlines():
         parts = line.split(":")
@@ -182,6 +185,10 @@ async def run_data_preparation_phase(
         count_str = parts[1].strip()
         vcf_file = parts[2].strip()
         ann_file = parts[3].strip() if len(parts) > 3 and parts[3] != "none" else ""
+        file_size = 0
+        if len(parts) > 4:
+            with contextlib.suppress(ValueError):
+                file_size = int(parts[4].strip())
         try:
             row_count = int(count_str)
         except ValueError:
@@ -194,9 +201,16 @@ async def run_data_preparation_phase(
                 vcf_file=vcf_file,
                 row_count=row_count,
                 annotation_file=ann_file,
+                file_size_bytes=file_size,
             )
         )
-        logger.info("  chr%s: %d variants (%s)", chrom, row_count, vcf_file)
+        logger.info(
+            "  chr%s: %d variants, %s bytes (%s)",
+            chrom,
+            row_count,
+            f"{file_size:,}",
+            vcf_file,
+        )
 
     if not state.chromosome_data:
         raise ValueError("No chromosome data could be scanned from VCF files")
