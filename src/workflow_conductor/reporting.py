@@ -6,13 +6,15 @@ paper/e2e-experiment-instructions.md.
 
 from __future__ import annotations
 
+import os
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from workflow_conductor import __version__
 from workflow_conductor.models import PipelineState
 
-# Approximate pricing per million tokens (USD), as of 2025-Q2.
+# Approximate pricing per million tokens (USD), snapshot as of 2026-03.
 _LLM_PRICING: dict[str, dict[str, float]] = {
     "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0},
     "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0},
@@ -24,9 +26,9 @@ _LLM_PRICING: dict[str, dict[str, float]] = {
 def _estimate_cost(usage: dict[str, Any]) -> str:
     """Estimate USD cost from token counts and model ID."""
     model = usage.get("model", "")
-    inp = usage.get("input_tokens", 0)
-    out = usage.get("output_tokens", 0)
-    if not inp and not out:
+    inp = usage.get("input_tokens") or 0
+    out = usage.get("output_tokens") or 0
+    if inp == 0 and out == 0:
         return "N/A"
     pricing = _LLM_PRICING.get(model)
     if not pricing:
@@ -38,14 +40,17 @@ def _estimate_cost(usage: dict[str, Any]) -> str:
 def _get_git_commit() -> str:
     """Get current git commit hash, or 'unknown'."""
     try:
+        # Pin to package root so git works regardless of process cwd
+        package_root = Path(__file__).resolve().parent.parent.parent
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
             timeout=5,
+            cwd=str(package_root),
         )
         return result.stdout.strip() if result.returncode == 0 else "unknown"
-    except Exception:
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         return "unknown"
 
 
@@ -252,14 +257,16 @@ def generate_experiment_report(state: PipelineState) -> str:
         lines.append("")
         lines.append("| Metric | Advisory (Phase 2) | Final (Phase 6) | Delta |")
         lines.append("|--------|-------------------|-----------------|-------|")
-        delta = actual_tasks - est_tasks
-        lines.append(f"| Total tasks | {est_tasks} | {actual_tasks} | {delta:+d} |")
+        est_tasks_int = int(est_tasks)
+        delta = actual_tasks - est_tasks_int
+        lines.append(f"| Total tasks | {est_tasks_int} | {actual_tasks} | {delta:+d} |")
         est_par = state.planning_estimates.get("estimated_parallelism")
         actual_par = wp.parallelism if wp else None
         if est_par is not None and actual_par is not None:
+            par_delta = int(actual_par) - int(est_par)
             lines.append(
-                f"| Parallelism (J) | {est_par} | {actual_par} "
-                f"| {actual_par - est_par:+d} |"
+                f"| Parallelism (J) | {int(est_par)} | {int(actual_par)} "
+                f"| {par_delta:+d} |"
             )
         lines.append("")
     elif state.planning_estimates:
@@ -268,7 +275,10 @@ def generate_experiment_report(state: PipelineState) -> str:
         lines.append("| Metric | Value |")
         lines.append("|--------|-------|")
         for k, v in state.planning_estimates.items():
-            if k != "estimated_variants":
+            if k == "estimated_variants" and isinstance(v, dict):
+                for chrom, count in v.items():
+                    lines.append(f"| estimated variants chr{chrom} | {count:,} |")
+            else:
                 lines.append(f"| {k} | {v} |")
         lines.append("")
 
@@ -349,8 +359,6 @@ def write_experiment_report(
         "{date}",
         state.execution_id[:8] if state.execution_id else "unknown",
     )
-
-    import os
 
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:
