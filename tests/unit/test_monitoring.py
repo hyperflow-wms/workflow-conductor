@@ -436,3 +436,40 @@ class TestTranslateToNl:
 
         call_kwargs = mock_client.messages.create.call_args.kwargs
         assert call_kwargs["model"] == settings.llm.anthropic_model
+
+
+# ---------------------------------------------------------------------------
+# Test: _capture_cluster_snapshot
+# ---------------------------------------------------------------------------
+
+
+class TestClusterSnapshots:
+    @pytest.mark.asyncio
+    async def test_capture_cluster_snapshot(self) -> None:
+        from workflow_conductor.phases.monitoring import _capture_cluster_snapshot
+
+        mock_kubectl = AsyncMock()
+        mock_kubectl._run = AsyncMock(
+            side_effect=[
+                "node-4  500m  12%  2Gi  45%",
+                "job-1  100m  256Mi",
+            ]
+        )
+
+        snapshot = await _capture_cluster_snapshot(mock_kubectl, "test-ns")
+        assert "timestamp" in snapshot
+        assert "nodes" in snapshot
+        assert "pods" in snapshot
+
+    @pytest.mark.asyncio
+    async def test_capture_snapshot_handles_errors(self) -> None:
+        from workflow_conductor.phases.monitoring import _capture_cluster_snapshot
+
+        mock_kubectl = AsyncMock()
+        mock_kubectl._run = AsyncMock(
+            side_effect=Exception("metrics not available")
+        )
+
+        snapshot = await _capture_cluster_snapshot(mock_kubectl, "test-ns")
+        assert snapshot["nodes"] == ""
+        assert snapshot["pods"] == ""

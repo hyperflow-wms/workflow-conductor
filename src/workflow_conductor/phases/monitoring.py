@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from execution_sentinel.config import SentinelSettings  # type: ignore[import-untyped]
@@ -25,6 +26,7 @@ from execution_sentinel.ui.display import (  # type: ignore[import-untyped]
     display_sentinel_banner,
 )
 
+from workflow_conductor.k8s import Kubectl
 from workflow_conductor.models import PipelinePhase, PipelineState
 from workflow_conductor.ui.display import display_phase_header
 
@@ -122,6 +124,28 @@ async def _translate_to_nl(
         return str(report.message), {}
 
 
+async def _capture_cluster_snapshot(
+    kubectl: Kubectl, namespace: str
+) -> dict[str, str]:
+    """Capture a point-in-time cluster utilization snapshot via kubectl top."""
+    snapshot: dict[str, str] = {
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+    try:
+        nodes_output = await kubectl._run(["top", "nodes", "--no-headers"])
+        snapshot["nodes"] = nodes_output.strip()
+    except Exception:
+        snapshot["nodes"] = ""
+    try:
+        pods_output = await kubectl._run(
+            ["top", "pods", "-n", namespace, "--no-headers"]
+        )
+        snapshot["pods"] = pods_output.strip()
+    except Exception:
+        snapshot["pods"] = ""
+    return snapshot
+
+
 async def run_monitoring_phase(
     state: PipelineState,
     settings: ConductorSettings,
@@ -163,6 +187,8 @@ async def run_monitoring_phase(
         "model": "",
     }
 
+    kubectl = Kubectl(kubeconfig=settings.kubernetes.kubeconfig)
+
     async def _drain() -> None:
         while True:
             report = await sentinel.reports.get()
@@ -176,7 +202,17 @@ async def run_monitoring_phase(
             display_report(report)
 
     drain_task = asyncio.create_task(_drain())
+
+    async def _snapshot_loop() -> None:
+        """Capture cluster utilization every 30 seconds."""
+        while True:
+            await asyncio.sleep(30)
+            snapshot = await _capture_cluster_snapshot(kubectl, state.namespace)
+            state.cluster_snapshots.append(snapshot)
+
+    snapshot_task = asyncio.create_task(_snapshot_loop())
     summary = await sentinel.watch()
+    snapshot_task.cancel()
     drain_task.cancel()
 
     # Flush any reports produced in the final iteration
