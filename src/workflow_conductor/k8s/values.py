@@ -64,9 +64,8 @@ def generate_helm_values(
         ),
     ]
 
-    # Job template for HyperFlow worker pods. Overrides the chart default
-    # to use hfmaster nodeSelector (same as engine/NFS/redis) so that
-    # single-node Kind clusters work without a separate hfworker node.
+    # Job template for HyperFlow worker pods. No nodeSelector — allows
+    # worker jobs to run on any node (hfmaster + hfworker nodes).
     job_template = """\
 apiVersion: batch/v1
 kind: Job
@@ -136,8 +135,6 @@ spec:
         volumeMounts:
         - name: my-pvc-nfs
           mountPath: ${volumePath}
-      nodeSelector:
-        hyperflow-wms/nodepool: hfmaster
       volumes:
       - name: my-pvc-nfs
         persistentVolumeClaim:

@@ -69,11 +69,11 @@ NL Prompt → ROUTING → PLANNING → VALIDATION (Gate 1) → PROVISIONING → 
 
          → GENERATION → APPROVAL (Gate 2) → DEPLOYMENT → MONITORING → COMPLETION
               │              │                    │            │            │
-           Composer       Rich UI              kubectl cp   poll K8s    teardown+
-           MCP tool       approve/abort        workflow.json job status  summary
-           deterministic  real task counts     +columns.txt
-           generate_workflow                   +pop files
-                                               +signal
+           Composer       Rich UI              kubectl cp   Execution   teardown+
+           MCP tool       approve/abort        workflow.json Sentinel    summary
+           deterministic  real task counts     +columns.txt  OOMKill/
+           generate_workflow                   +pop files    straggler
+                                               +signal       detection
 ```
 
 ### Data Flow (No Data Container)
@@ -96,6 +96,8 @@ The conductor does NOT use the `1000genome-data` Docker image. All data flows th
 - **Deterministic generation**: `generate_workflow` MCP tool called directly with actual VCF row counts and header (no LLM involved in generation phase)
 - **Population-filtered columns.txt**: VCF header passed to `generate_workflow` → returns columns.txt with only requested population samples (e.g., 91 GBR instead of all 2504)
 - **LLM factory**: `{"anthropic": AnthropicAugmentedLLM, "google": GoogleAugmentedLLM}` — provider switchable via config
+- **Execution Sentinel**: Phase 9 delegates to `execution-sentinel` package via `Sentinel.watch()` — handles OOMKill detection, straggler detection, mass-failure escalation, connectivity loss
+- **Worker job scheduling**: No nodeSelector on worker jobs — jobs run on all cluster nodes (hfmaster + hfworker). Engine/NFS/Redis pinned to hfmaster via Helm chart.
 
 ### Helm Values Generation
 
@@ -112,6 +114,7 @@ NFS volume (`nfs-volume` subchart) remains enabled — engine pod and worker job
 | Workflow Composer | MCP server (5 tools) | `1000genome/1000genome-workflow/workflow-composer/` |
 | Workflow Profiler | Python library | `1000genome/workflow-profiler/` |
 | HyperFlow K8s Deployment | Helm charts + Kind config | `hyperflow-k8s-deployment/` |
+| Execution Sentinel | Python library (monitoring) | `1000genome/execution-sentinel/` (GitHub: `hyperflow-wms/execution-sentinel`) |
 | Conductor Sample | Reference mcp-agent patterns | `agentic-systems/conductor-sample/` |
 
 ## Design Decisions (Do Not Revisit)
@@ -166,4 +169,8 @@ When testing the demo, run `make demo-test` (non-interactive, no pauses) in a ba
 
 ## Implementation Plan
 
-See `docs/implementation-plan.md` for the full plan (8 stages, 7 PRs for Stage 1). Stages 0-2.6 completed. Stage 2.7 (no data container + deterministic generation) in progress.
+See `docs/implementation-plan.md` for the full plan (8 stages, 7 PRs for Stage 1). Stages 0-2.7 completed. Current version: v1.2.0 (sentinel integration).
+
+## Paper Experiments
+
+See `paper/e2e-experiment-instructions.md` for the Euro-Par 2026 paper experiment plan (3 queries on 3-node k3s cluster).
