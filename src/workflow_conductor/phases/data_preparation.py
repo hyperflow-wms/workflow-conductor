@@ -155,7 +155,8 @@ async def run_data_preparation_phase(
     logger.info("Step 2: Scanning VCF files for row counts")
     discover_cmd = (
         "for c in " + " ".join(chromosomes) + "; do "
-        "  vcf=$(ls /work_dir/ALL.chr${c}.*.vcf 2>/dev/null "
+        "  vcf=$({ ls /work_dir/ALL.chr${c}.vcf "
+        "/work_dir/ALL.chr${c}.*.vcf; } 2>/dev/null "
         "    | grep -v annotation | grep -v sites | head -1); "
         "  ann=$(ls /work_dir/ALL.chr${c}.*annotation*.vcf 2>/dev/null | head -1); "
         '  if [ -n "$vcf" ]; then '

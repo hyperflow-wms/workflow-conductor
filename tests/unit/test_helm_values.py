@@ -80,17 +80,26 @@ class TestGenerateHelmValues:
 
     def test_nfs_volume_scales_for_large_data(self) -> None:
         settings = ConductorSettings()
-        plan = WorkflowPlan(estimated_data_size_gb=12.0)
+        plan = WorkflowPlan(estimated_data_size_gb=5.0)
         values = generate_helm_values(settings, plan, namespace="test-ns")
         storage = values["nfs-volume"]["pv"]["capacity"]["storage"]
-        # 12 * 2 + 5 = 29Gi
-        assert storage == "29Gi"
+        # 5 * 20 (decompressed) = 100GB disk, 100 * 1.5 + 5 = 155Gi
+        assert storage == "155Gi"
 
     def test_nfs_volume_minimum_10gi(self) -> None:
         settings = ConductorSettings()
-        plan = WorkflowPlan(estimated_data_size_gb=2.0)
+        plan = WorkflowPlan(estimated_data_size_gb=0.3)
         values = generate_helm_values(settings, plan, namespace="test-ns")
         assert values["nfs-volume"]["pv"]["capacity"]["storage"] == "10Gi"
+
+    def test_nfs_volume_small_region(self) -> None:
+        """Small region (e.g., BRCA1) still gets reasonable sizing."""
+        settings = ConductorSettings()
+        plan = WorkflowPlan(estimated_data_size_gb=1.0)
+        values = generate_helm_values(settings, plan, namespace="test-ns")
+        storage = values["nfs-volume"]["pv"]["capacity"]["storage"]
+        # 1 * 20 = 20GB disk, 20 * 1.5 + 5 = 35Gi
+        assert storage == "35Gi"
 
     def test_worker_pools_disabled(self) -> None:
         settings = ConductorSettings()
