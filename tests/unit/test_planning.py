@@ -458,3 +458,31 @@ class TestChromosomeInference:
         # Download commands populated via history fallback
         assert len(result.workflow_plan.download_commands) == 1
         assert "chr17" in result.workflow_plan.download_commands[0]
+
+
+class TestPlanningEstimates:
+    def test_extract_planning_estimates_full(self) -> None:
+        from workflow_conductor.phases.planning import _extract_planning_estimates
+
+        raw = {
+            "data_preparation": {
+                "estimated_transfer_mb": 512,
+                "steps": [
+                    {"chromosome": "6", "estimated_variants": 50000, "commands": []},
+                    {"chromosome": "17", "estimated_variants": 3000, "commands": []},
+                ],
+            },
+            "execution_hints": {"recommended_parallelism": 10},
+            "estimated_task_count": 340,
+        }
+        result = _extract_planning_estimates(raw)
+        assert result["estimated_transfer_mb"] == 512
+        assert result["estimated_parallelism"] == 10
+        assert result["estimated_tasks"] == 340
+        assert result["estimated_variants"]["6"] == 50000
+        assert result["estimated_variants"]["17"] == 3000
+
+    def test_extract_planning_estimates_empty(self) -> None:
+        from workflow_conductor.phases.planning import _extract_planning_estimates
+
+        assert _extract_planning_estimates({}) == {}
